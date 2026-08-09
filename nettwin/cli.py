@@ -6,6 +6,7 @@ import sys
 import webbrowser
 
 from . import __version__
+from .active_probe import ProbeTarget, collect_probes
 from .analytics import analyze
 from .config import load_config
 from .demo_data import generate_demo_csv
@@ -14,6 +15,17 @@ from .interface_collector import collect_interface, list_interfaces
 from .io import DataValidationError, load_and_validate_csv
 from .link_audit import analyze_link_audit, write_link_audit
 from .reporting import generate_report
+
+
+def _parse_target(value: str) -> ProbeTarget:
+    if "=" not in value:
+        raise argparse.ArgumentTypeError("Target inválido. Use NOMBRE=DIRECCION")
+    name, address = value.split("=", 1)
+    name = name.strip()
+    address = address.strip()
+    if not name or not address:
+        raise argparse.ArgumentTypeError("Target inválido. Use NOMBRE=DIRECCION")
+    return ProbeTarget(name=name, address=address)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -69,6 +81,26 @@ def build_parser() -> argparse.ArgumentParser:
     host_limit_group = host_parser.add_mutually_exclusive_group(required=True)
     host_limit_group.add_argument("--samples", type=int, help="Número exacto de muestras")
     host_limit_group.add_argument("--duration", type=float, help="Duración aproximada en segundos")
+
+    probes_parser = subparsers.add_parser(
+        "collect-probes",
+        help="Medir RTT, pérdida, reachability y variación temporal con ICMP pequeño",
+    )
+    probes_parser.add_argument(
+        "--target",
+        action="append",
+        type=_parse_target,
+        required=True,
+        help="Target autorizado en formato NOMBRE=DIRECCION; repetir para varios destinos",
+    )
+    probes_parser.add_argument("--output", "-o", default="runs/probe_samples.csv", help="CSV de salida")
+    probes_parser.add_argument("--interval", type=float, default=5.0, help="Segundos entre ciclos")
+    probes_parser.add_argument("--count-per-target", type=int, default=1, help="ICMP echo por target y ciclo")
+    probes_parser.add_argument("--timeout-ms", type=int, default=1000, help="Timeout por ICMP echo")
+    probes_parser.add_argument("--payload-bytes", type=int, default=32, help="Payload ICMP por echo")
+    probes_limit_group = probes_parser.add_mutually_exclusive_group(required=True)
+    probes_limit_group.add_argument("--cycles", type=int, help="Número de ciclos de medición")
+    probes_limit_group.add_argument("--duration", type=float, help="Duración aproximada en segundos")
 
     validate_parser = subparsers.add_parser("validar", help="Validar la estructura de un CSV")
     validate_parser.add_argument("csv", help="Ruta al archivo CSV")
@@ -142,6 +174,26 @@ def main(argv: list[str] | None = None) -> int:
             )
             print("Captura del host completada.")
             print(f"Intervalo: {args.interval} s")
+            print(f"Archivo: {path.resolve()}")
+            return 0
+
+        if args.command == "collect-probes":
+            path = collect_probes(
+                targets=args.target,
+                output=args.output,
+                interval_seconds=args.interval,
+                cycles=args.cycles,
+                duration_seconds=args.duration,
+                count_per_target=args.count_per_target,
+                timeout_ms=args.timeout_ms,
+                payload_bytes=args.payload_bytes,
+            )
+            estimated_per_cycle = len(args.target) * args.count_per_target * args.payload_bytes
+            print("Captura de sondas completada.")
+            print(f"Targets: {len(args.target)}")
+            print(f"Intervalo: {args.interval} s")
+            print(f"Payload ICMP: {args.payload_bytes} bytes")
+            print(f"Payload saliente estimado por ciclo: {estimated_per_cycle} bytes")
             print(f"Archivo: {path.resolve()}")
             return 0
 
