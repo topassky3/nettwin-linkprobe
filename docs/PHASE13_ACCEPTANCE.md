@@ -4,14 +4,15 @@ La fase no se considera cerrada hasta validar localmente todos los puntos.
 
 ## Suite
 
-Fase 12 terminó con 156 pruebas. Fase 13 añade 18 pruebas.
+Fase 12 terminó con 156 pruebas. Fase 13 añade 19 pruebas.
 
 Esperado:
 
 ```text
 9/9   Dataset Quality
 9/9   Report Engine
-174/174 suite completa
+1/1   Report CLI / analysis.json
+175/175 suite completa
 ```
 
 ## Run sintético rico
@@ -33,6 +34,7 @@ Debe producir:
 - pipeline analítico ejecutado;
 - `dataset_quality.json`;
 - `dataset_quality_summary.csv`;
+- `analysis.json` compacto;
 - artefactos Quality/Event/Correlation/Evidence/Fingerprint;
 - `report.json`;
 - `report.html`;
