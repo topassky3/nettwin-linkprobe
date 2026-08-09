@@ -10,6 +10,7 @@ from .active_probe import ProbeTarget, collect_probes
 from .analytics import analyze
 from .config import load_config
 from .demo_data import generate_demo_csv
+from .event_engine import EventThresholds, analyze_events, write_events
 from .host_collector import collect_host
 from .interface_collector import collect_interface, list_interfaces
 from .io import DataValidationError, load_and_validate_csv
@@ -115,6 +116,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="Capacidad autorizada/conocida del enlace para calcular utilización; no se infiere de la NIC",
     )
     quality_parser.add_argument("--output", "-o", default="resultados_quality", help="Directorio de salida")
+
+    events_parser = subparsers.add_parser(
+        "analyze-events",
+        help="Detectar ventanas con cambios simultáneos sin afirmar causalidad",
+    )
+    events_parser.add_argument(
+        "--interface-csv",
+        required=True,
+        help="quality_interface_processed.csv generado por Quality Engine",
+    )
+    events_parser.add_argument(
+        "--probe-csv",
+        required=True,
+        help="quality_probe_processed.csv generado por Quality Engine",
+    )
+    events_parser.add_argument("--output", "-o", default="resultados_events", help="Directorio de salida")
+    events_parser.add_argument("--bucket-seconds", type=int, default=5, help="Tamaño del bucket temporal")
+    events_parser.add_argument("--min-metrics", type=int, default=2, help="Mínimo de señales simultáneas para candidato")
+    events_parser.add_argument("--merge-gap-seconds", type=int, default=10, help="Separación máxima para unir buckets candidatos")
+    events_parser.add_argument("--utilization-high-pct", type=float, default=80.0, help="Umbral absoluto de utilización")
+    events_parser.add_argument("--utilization-delta-pp", type=float, default=20.0, help="Incremento vs baseline en puntos porcentuales")
+    events_parser.add_argument("--rtt-ratio", type=float, default=1.5, help="Factor de RTT respecto al baseline por target")
+    events_parser.add_argument("--rtt-delta-ms", type=float, default=10.0, help="Incremento mínimo de RTT respecto al baseline")
+    events_parser.add_argument("--delay-variation-ms", type=float, default=10.0, help="Piso de variación temporal de retardo")
+    events_parser.add_argument("--delay-variation-ratio", type=float, default=2.0, help="Factor de variación respecto al baseline")
+    events_parser.add_argument("--packet-loss-pct", type=float, default=1.0, help="Pérdida mínima para activar señal")
+    events_parser.add_argument("--rate-ratio", type=float, default=1.75, help="Factor de RX/TX rate si utilización es N/D")
+    events_parser.add_argument("--rate-delta-mbps", type=float, default=1.0, help="Incremento mínimo de rate si utilización es N/D")
+    events_parser.add_argument("--drops-delta", type=float, default=1.0, help="Deltas de drops para activar señal")
+    events_parser.add_argument("--errors-delta", type=float, default=1.0, help="Deltas de errors para activar señal")
 
     validate_parser = subparsers.add_parser("validar", help="Validar la estructura de un CSV")
     validate_parser.add_argument("csv", help="Ruta al archivo CSV")
@@ -231,6 +262,50 @@ def main(argv: list[str] | None = None) -> int:
             print("\nTargets:")
             print(quality.probe_summary.to_string(index=False))
             print(f"\nResumen: {manifest_path.resolve()}")
+            return 0
+
+        if args.command == "analyze-events":
+            thresholds = EventThresholds(
+                bucket_seconds=args.bucket_seconds,
+                min_metrics_changed=args.min_metrics,
+                merge_gap_seconds=args.merge_gap_seconds,
+                utilization_high_pct=args.utilization_high_pct,
+                utilization_delta_pp=args.utilization_delta_pp,
+                rtt_ratio=args.rtt_ratio,
+                rtt_delta_ms=args.rtt_delta_ms,
+                delay_variation_ms=args.delay_variation_ms,
+                delay_variation_ratio=args.delay_variation_ratio,
+                packet_loss_pct=args.packet_loss_pct,
+                rate_ratio=args.rate_ratio,
+                rate_delta_mbps=args.rate_delta_mbps,
+                drops_delta=args.drops_delta,
+                errors_delta=args.errors_delta,
+            )
+            event_result = analyze_events(
+                interface_processed_csv=args.interface_csv,
+                probe_processed_csv=args.probe_csv,
+                thresholds=thresholds,
+            )
+            events_path = write_events(event_result, args.output)
+            overlap = event_result.metadata["temporal_overlap"]
+            print("Event Engine completado correctamente.")
+            print("Alcance: únicamente ventana observada")
+            print(f"Solapamiento temporal: {overlap['duration_seconds']:.3f} s")
+            print(
+                "Detección ejecutada: "
+                + ("sí" if event_result.metadata["event_detection_executed"] else "no")
+            )
+            print(f"Eventos detectados: {len(event_result.events)}")
+            for event in event_result.events:
+                metrics = ", ".join(event["metrics_changed"])
+                print(
+                    f"  {event['event_id']} | {event['severity']} | "
+                    f"{event['confidence']} | {event['duration_seconds']:.1f} s | {metrics}"
+                )
+            if not overlap["exists"]:
+                print("ADVERTENCIA: interfaz y sondas no se solapan; no se generaron eventos conjuntos.")
+            print("Causalidad: NO inferida por Event Engine")
+            print(f"Eventos: {events_path.resolve()}")
             return 0
 
         validation = load_and_validate_csv(args.csv, getattr(args, "mapping", None))
