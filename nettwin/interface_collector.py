@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
 import csv
 from pathlib import Path
@@ -190,8 +190,7 @@ def collect_interface(
     collector = InterfaceCollector(interface, provider=provider)
     started = time.monotonic()
     count = 0
-    fieldnames = list(asdict(collector.sample()).keys())
-    collector = InterfaceCollector(interface, provider=provider)
+    fieldnames = [field.name for field in fields(InterfaceSample)]
 
     with output_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
