@@ -10,6 +10,7 @@ from nettwin.active_probe import (
     ActiveProbeEngine,
     ProbeTarget,
     _build_ping_command,
+    _parse_packet_counts,
     _parse_rtts,
     collect_probes,
 )
@@ -46,6 +47,38 @@ class ActiveProbeTests(unittest.TestCase):
     def test_parse_rtts_supports_english_and_spanish(self):
         text = "Reply: time=12ms\nRespuesta: tiempo=18ms\nRespuesta: tiempo<1ms"
         self.assertEqual(_parse_rtts(text), [12.0, 18.0, 0.5])
+
+    def test_parse_packet_counts_supports_windows_english_spanish_and_linux(self):
+        english = "Packets: Sent = 2, Received = 1, Lost = 1 (50% loss)"
+        spanish = "Paquetes: enviados = 2, recibidos = 2, perdidos = 0 (0% perdidos)"
+        linux = "2 packets transmitted, 1 received, 50% packet loss, time 1001ms"
+        self.assertEqual(_parse_packet_counts(english), (2, 1))
+        self.assertEqual(_parse_packet_counts(spanish), (2, 2))
+        self.assertEqual(_parse_packet_counts(linux), (2, 1))
+
+    def test_packet_summary_prevents_false_loss_when_rtt_word_is_unrecognized(self):
+        output = (
+            "Respuesta desde 127.0.0.1: bytes=32 latencia<1ms TTL=128\n"
+            "Estadísticas de ping para 127.0.0.1:\n"
+            "    Paquetes: enviados = 1, recibidos = 1, perdidos = 0 (0% perdidos),\n"
+        )
+
+        def runner(command, timeout_seconds):
+            return subprocess.CompletedProcess(command, 0, output, "")
+
+        engine = ActiveProbeEngine(
+            count_per_target=1,
+            runner=runner,
+            system_name="Windows",
+            clock=lambda: "2026-08-09T16:00:00+00:00",
+        )
+        sample = engine.probe(ProbeTarget("loopback", "127.0.0.1"))
+        self.assertTrue(sample.reachability)
+        self.assertEqual(sample.packets_sent, 1)
+        self.assertEqual(sample.packets_received, 1)
+        self.assertEqual(sample.packet_loss_pct, 0.0)
+        self.assertIsNone(sample.rtt_ms)
+        self.assertEqual(sample.sample_status, "ok")
 
     def test_probe_reports_loss_reachability_and_temporal_variation(self):
         outputs = iter([
