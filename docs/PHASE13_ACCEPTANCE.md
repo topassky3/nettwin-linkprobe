@@ -12,11 +12,30 @@ Esperado:
 9/9   Dataset Quality
 9/9   Report Engine
 1/1   Report CLI / analysis.json
-2/2   Acceptance CLI real
+2/2   Acceptance CLI de caja negra
 177/177 suite completa
 ```
 
-Las dos pruebas de aceptación CLI son deliberadamente de caja negra: ejecutan los mismos entrypoints públicos documentados, mediante `subprocess`, desde la raíz del repositorio. Esto evita que una importación directa en tests oculte problemas de `sys.path` que sí aparecen al ejecutar `python scripts/...py` desde PowerShell.
+## Acceptance CLI real
+
+Antes de la suite completa deben pasar los dos smoke tests que ejecutan los entrypoints públicos con `subprocess`, igual que PowerShell:
+
+```powershell
+python -m unittest tests.test_phase13_acceptance_cli -v
+```
+
+Estos tests validan:
+
+- `python scripts/generate_report_debug_run.py --output ...` ejecutado por ruta;
+- `python nettwin.py report ...` de extremo a extremo;
+- exit code `0`;
+- creación del run sellado;
+- Quality Gate `PASS`;
+- `dataset_quality.json`, `analysis.json`, `report.json` y `report.html`;
+- al menos un evento, finding y fingerprint;
+- `causal_inference_performed=false`.
+
+Las pruebas no dependen de la codificación exacta con la que Windows renderice caracteres acentuados en stdout. Los estados canónicos se validan mediante exit code y artefactos JSON.
 
 ## Run sintético rico
 
@@ -50,17 +69,6 @@ Debe producir:
 - metodología;
 - limitaciones;
 - hashes SHA-256 de fuentes.
-
-## Prueba de aceptación CLI real
-
-```powershell
-python -m unittest tests.test_phase13_acceptance_cli -v
-```
-
-Debe demostrar:
-
-1. `python scripts\generate_report_debug_run.py --output ...` funciona como comando real y no produce `ModuleNotFoundError`.
-2. El flujo público generador → `python nettwin.py report ...` termina con exit code 0 y produce los artefactos canónicos.
 
 ## Run real de Fase 12
 
@@ -105,6 +113,7 @@ Generar el mismo reporte dos veces en directorios externos distintos debe produc
 ```text
 report-a/report.json == report-b/report.json
 report-a/report.html == report-b/report.html
+report-a/analysis.json == report-b/analysis.json
 ```
 
 byte a byte.
@@ -125,5 +134,6 @@ byte a byte.
 - recomendaciones ligadas a evidencia ✅
 - limitaciones ✅
 - anexos técnicos ✅
+- `analysis.json` ✅
 - HTML ✅
 - PDF opcional cuando WeasyPrint está disponible ✅
