@@ -145,7 +145,11 @@ class QualityEngineTests(unittest.TestCase):
             root = Path(tmp)
             interface_path, probe_path = self._write_inputs(root)
             probes = pd.read_csv(probe_path)
-            probes["timestamp"] = pd.to_datetime(probes["timestamp"], utc=True) + pd.Timedelta(minutes=30)
+            shifted = pd.to_datetime(probes["timestamp"], utc=True)
+            probes["timestamp"] = [
+                (timestamp + pd.Timedelta(seconds=1800)).isoformat()
+                for timestamp in shifted
+            ]
             probes.to_csv(probe_path, index=False)
             result = analyze_quality(interface_path, probe_path, capacity_mbps=20)
         overlap = result.metadata["temporal_overlap"]
