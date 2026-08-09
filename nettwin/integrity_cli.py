@@ -13,6 +13,7 @@ from nettwin.integrity_engine import (
 
 
 COMMANDS = {"finalize-integrity", "verify-integrity", "repro-check"}
+_REPRO_OWNED_NAMES = {"replay_a", "replay_b", "reproducibility_report.json"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -124,7 +125,25 @@ def _verify(args: argparse.Namespace) -> int:
     return 0 if result.valid else 2
 
 
+def _validate_repro_output(output: str | Path) -> None:
+    root = Path(output)
+    if not root.exists():
+        return
+    if not root.is_dir():
+        raise ValueError(f"--output debe ser un directorio: {root}")
+    unexpected = sorted(
+        child.name for child in root.iterdir()
+        if child.name not in _REPRO_OWNED_NAMES
+    )
+    if unexpected:
+        raise ValueError(
+            "El directorio de repro-check contiene archivos ajenos a NetTwin y no será eliminado: "
+            + ", ".join(unexpected)
+        )
+
+
 def _repro(args: argparse.Namespace) -> int:
+    _validate_repro_output(args.output)
     result = check_reproducibility(
         args.interface_csv,
         args.probe_csv,
