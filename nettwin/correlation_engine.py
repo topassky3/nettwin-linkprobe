@@ -347,7 +347,20 @@ def _aligned_network(
     probe_bucketed: pd.DataFrame,
 ) -> pd.DataFrame:
     if interface_bucketed.empty or probe_bucketed.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(
+            columns=[
+                "bucket",
+                "target",
+                "rtt_ms",
+                "delay_variation_ms",
+                "packet_loss_pct",
+                "utilization_pct",
+                "rx_rate_mbps",
+                "tx_rate_mbps",
+                "drops_delta",
+                "errors_delta",
+            ]
+        )
     return probe_bucketed.merge(interface_bucketed, on="bucket", how="inner")
 
 
@@ -356,7 +369,16 @@ def _aligned_host(
     probe_bucketed: pd.DataFrame,
 ) -> pd.DataFrame:
     if host_bucketed.empty or probe_bucketed.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(
+            columns=[
+                "bucket",
+                "target",
+                "rtt_ms",
+                "delay_variation_ms",
+                "packet_loss_pct",
+                "cpu_percent",
+            ]
+        )
     return probe_bucketed.merge(host_bucketed, on="bucket", how="inner")
 
 
