@@ -9,6 +9,7 @@ import re
 import statistics
 import subprocess
 import time
+import unicodedata
 from typing import Callable, Iterable, Sequence
 
 
@@ -101,6 +102,67 @@ def _parse_rtts(output: str) -> list[float]:
     return values
 
 
+def _normalized_ping_text(output: str) -> str:
+    """Normaliza solo para reconocer resúmenes localizados de ping.
+
+    No altera ni almacena el output original. Quita diacríticos y pasa a
+    minúsculas para soportar variantes como ``Estadísticas`` / ``estadisticas``.
+    """
+    normalized = unicodedata.normalize("NFKD", output)
+    return "".join(char for char in normalized if not unicodedata.combining(char)).lower()
+
+
+def _parse_packet_counts(output: str) -> tuple[int, int] | None:
+    """Obtiene ``(sent, received)`` del resumen de ping cuando está disponible.
+
+    Se soportan los formatos comunes de Windows en inglés/español y el resumen
+    tradicional de ping tipo Unix. Esto separa reachability/pérdida del parser de
+    RTT: una localización desconocida no debe convertirse falsamente en 100% loss.
+    """
+    text = _normalized_ping_text(output)
+    patterns = (
+        re.compile(
+            r"packets\s*:\s*sent\s*=\s*(\d+)\s*,\s*received\s*=\s*(\d+)\s*,\s*lost\s*=\s*(\d+)",
+            flags=re.IGNORECASE,
+        ),
+        re.compile(
+            r"paquetes\s*:\s*enviados\s*=\s*(\d+)\s*,\s*recibidos\s*=\s*(\d+)\s*,\s*perdidos\s*=\s*(\d+)",
+            flags=re.IGNORECASE,
+        ),
+        re.compile(
+            r"(\d+)\s+packets?\s+transmitted\s*,\s*(\d+)\s+(?:packets?\s+)?received",
+            flags=re.IGNORECASE,
+        ),
+        re.compile(
+            r"(\d+)\s+paquetes?\s+transmitidos\s*,\s*(\d+)\s+(?:paquetes?\s+)?recibidos",
+            flags=re.IGNORECASE,
+        ),
+    )
+    for pattern in patterns:
+        match = pattern.search(text)
+        if not match:
+            continue
+        sent = int(match.group(1))
+        received = int(match.group(2))
+        if sent < 0 or received < 0 or received > sent:
+            return None
+        return sent, received
+    return None
+
+
+def _count_reply_lines(output: str) -> int:
+    """Fallback conservador: una línea con TTL representa una respuesta ICMP.
+
+    Windows y los pings Unix suelen imprimir TTL/ttl por respuesta. Se usa solo
+    cuando no hay resumen de paquetes parseable.
+    """
+    return sum(
+        1
+        for line in output.splitlines()
+        if re.search(r"\bttl\s*[=:]\s*\d+\b", line, flags=re.IGNORECASE)
+    )
+
+
 def _delay_variation(current_rtt: float | None, previous_rtt: float | None) -> float | None:
     """Cambio absoluto entre el RTT mediano actual y el anterior.
 
@@ -113,11 +175,14 @@ def _delay_variation(current_rtt: float | None, previous_rtt: float | None) -> f
 
 
 def _default_runner(command: Sequence[str], timeout_seconds: float) -> subprocess.CompletedProcess[str]:
+    # Sin ``encoding=`` explícito: Python usa el encoding local de la consola.
+    # Esto es importante en Windows en español, donde ping puede emitir cp1252/
+    # OEM en vez de UTF-8. ``errors=replace`` evita que una localización extraña
+    # tumbe el collector.
     return subprocess.run(
         list(command),
         capture_output=True,
         text=True,
-        encoding="utf-8",
         errors="replace",
         timeout=timeout_seconds,
         check=False,
@@ -166,8 +231,18 @@ class ActiveProbeEngine:
             completed = self.runner(command, timeout_seconds)
             output = (completed.stdout or "") + "\n" + (completed.stderr or "")
             rtts = _parse_rtts(output)
-            received = min(len(rtts), self.count_per_target)
+            packet_counts = _parse_packet_counts(output)
+
             sent = self.count_per_target
+            if packet_counts is not None:
+                parsed_sent, parsed_received = packet_counts
+                if parsed_sent > 0:
+                    sent = parsed_sent
+                received = min(max(parsed_received, 0), sent)
+            else:
+                reply_lines = _count_reply_lines(output)
+                received = min(max(len(rtts), reply_lines), sent)
+
             loss = ((sent - received) / sent) * 100.0
             reachable = received > 0
             median_rtt = statistics.median(rtts) if rtts else None
