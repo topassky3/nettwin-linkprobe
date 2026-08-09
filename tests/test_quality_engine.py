@@ -145,10 +145,11 @@ class QualityEngineTests(unittest.TestCase):
             root = Path(tmp)
             interface_path, probe_path = self._write_inputs(root)
             probes = pd.read_csv(probe_path)
-            shifted = pd.to_datetime(probes["timestamp"], utc=True)
             probes["timestamp"] = [
-                (timestamp + pd.Timedelta(seconds=1800)).isoformat()
-                for timestamp in shifted
+                "2026-08-09T16:30:00+00:00",
+                "2026-08-09T16:30:05+00:00",
+                "2026-08-09T16:30:10+00:00",
+                "2026-08-09T16:30:15+00:00",
             ]
             probes.to_csv(probe_path, index=False)
             result = analyze_quality(interface_path, probe_path, capacity_mbps=20)
