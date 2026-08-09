@@ -10,6 +10,7 @@ from .analytics import analyze
 from .config import load_config
 from .demo_data import generate_demo_csv
 from .io import DataValidationError, load_and_validate_csv
+from .link_audit import analyze_link_audit, write_link_audit
 from .reporting import generate_report
 
 
@@ -21,14 +22,28 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"NetTwin ISP {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    analyze_parser = subparsers.add_parser("analizar", help="Analizar un CSV de métricas de enlaces")
-    analyze_parser.add_argument("csv", help="Ruta al archivo CSV")
-    analyze_parser.add_argument("--output", "-o", default="resultados", help="Directorio de salida")
-    analyze_parser.add_argument("--company", default="ISP", help="Nombre de la empresa para el informe")
-    analyze_parser.add_argument("--config", help="Ruta opcional a un archivo JSON de configuración")
-    analyze_parser.add_argument("--mapping", help="JSON opcional: columna_origen -> columna_canonica")
-    analyze_parser.add_argument("--open", action="store_true", help="Abrir el informe al terminar")
-    analyze_parser.add_argument("--demo", action="store_true", help="Marcar claramente el informe como datos sintéticos")
+    def add_history_arguments(p: argparse.ArgumentParser) -> None:
+        p.add_argument("csv", help="Ruta al archivo CSV")
+        p.add_argument("--output", "-o", default="resultados", help="Directorio de salida")
+        p.add_argument("--company", default="ISP", help="Nombre de la empresa para el informe")
+        p.add_argument("--config", help="Ruta opcional a un archivo JSON de configuración")
+        p.add_argument("--mapping", help="JSON opcional: columna_origen -> columna_canonica")
+        p.add_argument("--open", action="store_true", help="Abrir el informe al terminar")
+        p.add_argument("--demo", action="store_true", help="Marcar claramente el informe como datos sintéticos")
+
+    analyze_parser = subparsers.add_parser("analizar", help="Analizar histórico de métricas de enlaces")
+    add_history_arguments(analyze_parser)
+
+    history_parser = subparsers.add_parser("analyze-history", help="Alias explícito del análisis histórico")
+    add_history_arguments(history_parser)
+
+    audit_parser = subparsers.add_parser(
+        "link-audit",
+        help="Auditar una ventana corta sin proyecciones de largo plazo",
+    )
+    audit_parser.add_argument("csv", help="Ruta al CSV de la ventana observada")
+    audit_parser.add_argument("--output", "-o", default="resultados_link_audit", help="Directorio de salida")
+    audit_parser.add_argument("--mapping", help="JSON opcional: columna_origen -> columna_canonica")
 
     validate_parser = subparsers.add_parser("validar", help="Validar la estructura de un CSV")
     validate_parser.add_argument("csv", help="Ruta al archivo CSV")
@@ -78,6 +93,18 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"  {source} -> {target}")
             for warning in validation.warnings:
                 print(f"ADVERTENCIA: {warning}")
+            return 0
+
+        if args.command == "link-audit":
+            audit = analyze_link_audit(validation.data)
+            manifest_path = write_link_audit(audit, Path(args.output))
+            print("Link audit completado correctamente.")
+            print(f"Registros aceptados: {validation.accepted_rows}")
+            print(f"Registros rechazados: {validation.rejected_rows}")
+            print(f"Enlaces auditados: {len(audit.summary)}")
+            print("Proyecciones de largo plazo: DESACTIVADAS")
+            print(audit.summary.to_string(index=False))
+            print(f"\nManifiesto: {manifest_path.resolve()}")
             return 0
 
         config = load_config(args.config)
