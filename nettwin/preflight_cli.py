@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 
 from nettwin import __version__
-from nettwin.preflight_engine import run_preflight
+from nettwin.preflight_runtime import run_preflight
 
 
 COMMAND = "preflight"
