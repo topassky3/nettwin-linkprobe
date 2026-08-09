@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 
 from nettwin import __version__
-from nettwin.orchestrator_engine import run_linkprobe
+from nettwin.orchestrator_runtime import run_linkprobe
 
 
 COMMAND = "run-linkprobe"
