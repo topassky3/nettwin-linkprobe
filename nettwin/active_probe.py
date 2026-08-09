@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
 import csv
 from pathlib import Path
@@ -85,9 +85,8 @@ def _build_ping_command(
 def _parse_rtts(output: str) -> list[float]:
     """Extrae RTT de respuestas de ping en inglés o español.
 
-    Soporta formatos como ``time=12ms``, ``time<1ms``, ``tiempo=18ms`` y
-    ``tiempo<1ms``. Para una respuesta ``<1ms`` usa 0.5 ms como estimación
-    conservadora únicamente para permitir estadística reproducible.
+    Soporta ``time=12ms``, ``time<1ms``, ``tiempo=18ms`` y ``tiempo<1ms``.
+    Para ``<1ms`` usa 0.5 ms como aproximación reproducible.
     """
     pattern = re.compile(
         r"(?:time|tiempo)\s*([=<])\s*(\d+(?:[\.,]\d+)?)\s*ms",
@@ -103,11 +102,10 @@ def _parse_rtts(output: str) -> list[float]:
 
 
 def _delay_variation(current_rtt: float | None, previous_rtt: float | None) -> float | None:
-    """Variación absoluta entre el RTT mediano actual y el anterior.
+    """Cambio absoluto entre el RTT mediano actual y el anterior.
 
-    Esta métrica es una variación temporal operacional para el piloto, no una
-    afirmación de jitter unidireccional. Se documenta explícitamente para que
-    el informe pueda reproducir el cálculo.
+    Es una métrica operacional de variación temporal para el piloto; no se
+    presenta como jitter unidireccional.
     """
     if current_rtt is None or previous_rtt is None:
         return None
@@ -162,7 +160,6 @@ class ActiveProbeEngine:
             payload_bytes=self.payload_bytes,
             system_name=self.system_name,
         )
-        # Margen adicional para inicio de proceso y respuestas tardías.
         timeout_seconds = max(2.0, (self.timeout_ms / 1000.0) * self.count_per_target + 2.0)
 
         try:
@@ -218,8 +215,7 @@ class ActiveProbeEngine:
             )
 
     def probe_all(self, targets: Iterable[ProbeTarget]) -> list[ProbeSample]:
-        # Cada target se ejecuta de forma independiente para que un fallo no
-        # detenga la medición de los demás.
+        # Cada target se ejecuta independientemente: uno caído no bloquea los demás.
         return [self.probe(target) for target in targets]
 
 
@@ -261,17 +257,7 @@ def collect_probes(
         runner=runner,
         system_name=system_name,
     )
-
-    fieldnames = list(asdict(engine.probe(targets[0])).keys())
-    # Reiniciar el motor para que la inspección de columnas no contamine el
-    # estado de variación temporal ni genere una muestra real perdida.
-    engine = ActiveProbeEngine(
-        count_per_target=count_per_target,
-        timeout_ms=timeout_ms,
-        payload_bytes=payload_bytes,
-        runner=runner,
-        system_name=system_name,
-    )
+    fieldnames = [field.name for field in fields(ProbeSample)]
 
     started = time.monotonic()
     cycle = 0
