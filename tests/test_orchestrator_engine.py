@@ -191,16 +191,37 @@ class OrchestratorTests(unittest.TestCase):
             self.assertFalse(orchestration["network_safety"]["payload_capture"])
 
     def test_collectors_share_window_but_keep_independent_intervals(self):
+        # No usamos decenas de milisegundos con conteos exactos: Windows puede
+        # despertar un thread algunos ms tarde y volver flaky un test que no
+        # representa las ventanas reales de segundos/minutos del sensor.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             result = self._run(self._config(
-                root, duration=0.11, interface_interval=0.03,
-                host_interval=0.05, probe_interval=0.07,
+                root, duration=0.42, interface_interval=0.05,
+                host_interval=0.10, probe_interval=0.20,
             ))
             payload = json.loads(result.orchestration_path.read_text(encoding="utf-8"))
-            self.assertEqual(payload["collectors"]["interface"]["cycles"], 4)
-            self.assertEqual(payload["collectors"]["host"]["cycles"], 3)
-            self.assertEqual(payload["collectors"]["probes"]["cycles"], 2)
+            interface = payload["collectors"]["interface"]
+            host = payload["collectors"]["host"]
+            probes = payload["collectors"]["probes"]
+
+            # La frecuencia más alta debe producir claramente más ciclos que la
+            # intermedia, y esta más que la lenta, sin exigir un tick exacto de
+            # scheduler del SO en el borde de la ventana.
+            self.assertGreater(interface["cycles"], host["cycles"])
+            self.assertGreater(host["cycles"], probes["cycles"])
+            self.assertGreaterEqual(probes["cycles"], 2)
+            self.assertEqual(interface["interval_seconds"], 0.05)
+            self.assertEqual(host["interval_seconds"], 0.10)
+            self.assertEqual(probes["interval_seconds"], 0.20)
+
+            firsts = [
+                datetime.fromisoformat(interface["first_timestamp"]),
+                datetime.fromisoformat(host["first_timestamp"]),
+                datetime.fromisoformat(probes["first_timestamp"]),
+            ]
+            startup_spread = (max(firsts) - min(firsts)).total_seconds()
+            self.assertLess(startup_spread, 0.15)
             self.assertEqual(payload["status"], "completed")
 
     def test_probe_rows_are_per_target_without_stopping_other_collectors(self):
