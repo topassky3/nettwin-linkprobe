@@ -5,6 +5,19 @@ import csv
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
+import sys
+
+# Permite ejecutar este archivo exactamente como lo hará un administrador desde
+# la raíz del repositorio:
+#
+#   python scripts/generate_report_debug_run.py --output ...
+#
+# Cuando Python ejecuta un script por ruta, sys.path[0] apunta a scripts/ y no a
+# la raíz del proyecto. Insertamos únicamente la raíz que contiene el paquete
+# local `nettwin`; no instalamos dependencias ni modificamos el entorno global.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from nettwin.integrity_engine import IntegrityConfig, finalize_integrity, verify_integrity
 
