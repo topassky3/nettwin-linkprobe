@@ -9,6 +9,7 @@ from . import __version__
 from .analytics import analyze
 from .config import load_config
 from .demo_data import generate_demo_csv
+from .interface_collector import collect_interface, list_interfaces
 from .io import DataValidationError, load_and_validate_csv
 from .link_audit import analyze_link_audit, write_link_audit
 from .reporting import generate_report
@@ -45,6 +46,19 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--output", "-o", default="resultados_link_audit", help="Directorio de salida")
     audit_parser.add_argument("--mapping", help="JSON opcional: columna_origen -> columna_canonica")
 
+    subparsers.add_parser("interfaces", help="Listar interfaces de red visibles para el sensor")
+
+    collect_parser = subparsers.add_parser(
+        "collect-interface",
+        help="Capturar contadores de una interfaz sin modificar la red",
+    )
+    collect_parser.add_argument("--interface", required=True, help="Nombre exacto de la interfaz")
+    collect_parser.add_argument("--output", "-o", default="runs/interface_samples.csv", help="CSV de salida")
+    collect_parser.add_argument("--interval", type=float, default=5.0, help="Segundos entre muestras")
+    limit_group = collect_parser.add_mutually_exclusive_group(required=True)
+    limit_group.add_argument("--samples", type=int, help="Número exacto de muestras")
+    limit_group.add_argument("--duration", type=float, help="Duración aproximada en segundos")
+
     validate_parser = subparsers.add_parser("validar", help="Validar la estructura de un CSV")
     validate_parser.add_argument("csv", help="Ruta al archivo CSV")
     validate_parser.add_argument("--mapping", help="JSON opcional de mapeo de columnas")
@@ -78,6 +92,34 @@ def main(argv: list[str] | None = None) -> int:
             path = generate_demo_csv(args.output, args.seed)
             print(f"CSV sintético generado: {path.resolve()}")
             print("Aviso: estos datos son únicamente de demostración.")
+            return 0
+
+        if args.command == "interfaces":
+            rows = list_interfaces()
+            if not rows:
+                print("No se detectaron interfaces.")
+                return 1
+            print("interface\tstate\tspeed_mbps\tmtu\tcounters")
+            for row in rows:
+                state = "UP" if row["is_up"] else ("DOWN" if row["is_up"] is False else "N/D")
+                speed = "N/D" if row["speed_mbps"] is None else row["speed_mbps"]
+                mtu = "N/D" if row["mtu"] is None else row["mtu"]
+                counters = "sí" if row["has_counters"] else "no"
+                print(f"{row['interface']}\t{state}\t{speed}\t{mtu}\t{counters}")
+            return 0
+
+        if args.command == "collect-interface":
+            path = collect_interface(
+                interface=args.interface,
+                output=args.output,
+                interval_seconds=args.interval,
+                samples=args.samples,
+                duration_seconds=args.duration,
+            )
+            print("Captura de interfaz completada.")
+            print(f"Interfaz: {args.interface}")
+            print(f"Intervalo: {args.interval} s")
+            print(f"Archivo: {path.resolve()}")
             return 0
 
         validation = load_and_validate_csv(args.csv, getattr(args, "mapping", None))
