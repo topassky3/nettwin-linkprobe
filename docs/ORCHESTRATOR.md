@@ -83,7 +83,7 @@ Cada collector mantiene su frecuencia independiente:
 La planificación utiliza deadlines absolutos derivados de T0, no una cadena de
 `sleep(interval)` acumulativa. Esto reduce drift temporal.
 
-Ejemplo:
+Ejemplo operacional:
 
 ```text
 duration = 12 s
@@ -94,8 +94,14 @@ probes = 2 s
 T0  T+2  T+4  T+6  T+8  T+10
 ```
 
-Se esperan seis ciclos por collector. Para probes, cada ciclo produce una fila
-por target.
+En una ejecución normal se esperan aproximadamente seis ciclos por collector.
+Para probes, cada ciclo produce una fila por target.
+
+El número exacto de ticks en pruebas extremadamente cortas de decenas de
+milisegundos no es un criterio fiable porque el scheduler del sistema operativo
+puede despertar un thread unos milisegundos tarde. Los tests de concurrencia
+validan T0 compartido y orden de frecuencias con margen operacional, mientras
+que `orchestration.json` conserva los conteos reales, overruns y lag observado.
 
 ## Rondas de probes lentas
 
@@ -108,6 +114,33 @@ el intervalo configurado:
 4. no se crea otro thread de probes para intentar alcanzar el reloj.
 
 Esto evita multiplicar tráfico activo bajo degradación.
+
+## Reachability, pérdida y RTT
+
+Reachability/pérdida no dependen exclusivamente de que el parser pueda extraer
+RTT del texto de `ping`.
+
+Active Probe usa:
+
+1. resumen de paquetes de Windows en inglés/español o formato Unix;
+2. líneas con TTL como fallback;
+3. RTT individual cuando su formato es reconocible.
+
+Así, una localización no reconocida del texto de RTT no debe convertirse
+falsamente en 100% de pérdida.
+
+En Windows el subprocess usa el encoding local de consola con `errors=replace`;
+no se fuerza UTF-8 sobre la salida de `ping`.
+
+Un target puede ser genuinamente no alcanzable aun siendo local si ICMP está
+bloqueado por una política del host. Por eso el debug debe contrastarse con el
+comando bruto:
+
+```powershell
+ping -n 1 -w 1000 -l 32 127.0.0.1
+```
+
+El sensor nunca fuerza `reachable=true` solo porque el target sea loopback.
 
 ## Errores parciales
 
@@ -218,6 +251,14 @@ necesarias para trazabilidad.
 El log se cierra **antes** de generar checksums. Después del sellado no se vuelve
 a modificar el archivo.
 
+El archivo es UTF-8. En Windows PowerShell 5.1 conviene leerlo explícitamente:
+
+```powershell
+Get-Content .\run\logs\linkprobe.log -Encoding UTF8
+```
+
+para evitar mojibake como `ConfiguraciÃ³n` al usar el encoding predeterminado.
+
 ## Integridad automática
 
 Una captura iniciada siempre intenta ejecutar:
@@ -274,7 +315,9 @@ payload = 32 bytes
 count = 1
 ```
 
-Por tanto los ICMP permanecen en el propio host.
+Por tanto los ICMP permanecen en el propio host. Que permanezcan en el host no
+garantiza que el sistema operativo permita responderlos; la reachability se
+interpreta según el resultado real de `ping`.
 
 Ejecutar:
 
@@ -295,6 +338,7 @@ o generar otro directorio. Esta protección es intencional.
 - Cada collector conserva su frecuencia configurada.
 - Las muestras se escriben incrementalmente y se hace flush.
 - Un target caído no detiene Interface/Host ni otros targets.
+- Reachability/loss no dependen solo del parser de RTT.
 - Un error puntual queda registrado y no rompe el run.
 - Un fallo fatal parcial queda explícito.
 - SIGINT/SIGTERM producen cierre coordinado.
