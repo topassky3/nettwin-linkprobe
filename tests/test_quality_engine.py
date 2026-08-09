@@ -71,17 +71,31 @@ class QualityEngineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             interface_path, probe_path = self._write_inputs(root)
-            interface = pd.read_csv(interface_path)
-            error_row = interface.iloc[[1]].copy()
-            error_row["timestamp"] = "2026-08-09T16:00:10+00:00"
-            error_row["sample_status"] = "error"
-            for column in ["rx_bytes_delta", "tx_bytes_delta", "rx_errors_delta", "tx_errors_delta", "rx_drops_delta", "tx_drops_delta"]:
-                error_row[column] = None
-            recovered = interface.iloc[[2]].copy()
-            recovered["timestamp"] = "2026-08-09T16:00:20+00:00"
-            recovered["rx_bytes_delta"] = 20_000_000
-            recovered["tx_bytes_delta"] = 10_000_000
-            transient = pd.concat([interface.iloc[[0]], error_row, recovered], ignore_index=True)
+            transient = pd.DataFrame(
+                [
+                    {
+                        "timestamp": "2026-08-09T16:00:00+00:00", "interface": "eth0",
+                        "rx_bytes_delta": None, "tx_bytes_delta": None,
+                        "rx_errors_delta": None, "tx_errors_delta": None,
+                        "rx_drops_delta": None, "tx_drops_delta": None,
+                        "sample_status": "ok", "reported_link_speed_mbps": 1000,
+                    },
+                    {
+                        "timestamp": "2026-08-09T16:00:10+00:00", "interface": "eth0",
+                        "rx_bytes_delta": None, "tx_bytes_delta": None,
+                        "rx_errors_delta": None, "tx_errors_delta": None,
+                        "rx_drops_delta": None, "tx_drops_delta": None,
+                        "sample_status": "error", "reported_link_speed_mbps": None,
+                    },
+                    {
+                        "timestamp": "2026-08-09T16:00:20+00:00", "interface": "eth0",
+                        "rx_bytes_delta": 20_000_000, "tx_bytes_delta": 10_000_000,
+                        "rx_errors_delta": 0, "tx_errors_delta": 0,
+                        "rx_drops_delta": 0, "tx_drops_delta": 0,
+                        "sample_status": "ok", "reported_link_speed_mbps": 1000,
+                    },
+                ]
+            )
             transient.to_csv(interface_path, index=False)
             result = analyze_quality(interface_path, probe_path, capacity_mbps=20)
         recovered_row = result.interface_processed.iloc[2]
@@ -122,6 +136,24 @@ class QualityEngineTests(unittest.TestCase):
         self.assertEqual(result.metadata["scope"], "observed_window_only")
         self.assertIn("ventana observada", result.metadata["availability_definition"])
         self.assertIn("no es jitter unidireccional", result.metadata["delay_variation_definition"])
+        self.assertTrue(result.metadata["temporal_overlap"]["exists"])
+        self.assertAlmostEqual(result.metadata["temporal_overlap"]["duration_seconds"], 15.0)
+        self.assertAlmostEqual(result.metadata["duration_seconds"], 15.0)
+
+    def test_non_overlapping_inputs_are_explicitly_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            interface_path, probe_path = self._write_inputs(root)
+            probes = pd.read_csv(probe_path)
+            probes["timestamp"] = pd.to_datetime(probes["timestamp"], utc=True) + pd.Timedelta(minutes=30)
+            probes.to_csv(probe_path, index=False)
+            result = analyze_quality(interface_path, probe_path, capacity_mbps=20)
+        overlap = result.metadata["temporal_overlap"]
+        self.assertFalse(overlap["exists"])
+        self.assertEqual(overlap["duration_seconds"], 0.0)
+        self.assertEqual(result.metadata["duration_seconds"], 0.0)
+        self.assertGreater(result.metadata["union_span_seconds"], 0.0)
+        self.assertTrue(any("no se solapan" in item for item in result.metadata["limitations"]))
 
     def test_write_quality_emits_reproducible_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
