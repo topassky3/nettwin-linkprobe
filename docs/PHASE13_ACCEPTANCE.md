@@ -4,7 +4,7 @@ La fase no se considera cerrada hasta validar localmente todos los puntos.
 
 ## Suite
 
-Fase 12 terminó con 156 pruebas. Fase 13 añade 19 pruebas.
+Fase 12 terminó con 156 pruebas. Fase 13 añade 21 pruebas.
 
 Esperado:
 
@@ -12,8 +12,11 @@ Esperado:
 9/9   Dataset Quality
 9/9   Report Engine
 1/1   Report CLI / analysis.json
-175/175 suite completa
+2/2   Acceptance CLI real
+177/177 suite completa
 ```
+
+Las dos pruebas de aceptación CLI son deliberadamente de caja negra: ejecutan los mismos entrypoints públicos documentados, mediante `subprocess`, desde la raíz del repositorio. Esto evita que una importación directa en tests oculte problemas de `sys.path` que sí aparecen al ejecutar `python scripts/...py` desde PowerShell.
 
 ## Run sintético rico
 
@@ -34,8 +37,8 @@ Debe producir:
 - pipeline analítico ejecutado;
 - `dataset_quality.json`;
 - `dataset_quality_summary.csv`;
-- `analysis.json` compacto;
 - artefactos Quality/Event/Correlation/Evidence/Fingerprint;
+- `analysis.json`;
 - `report.json`;
 - `report.html`;
 - al menos un evento sintético;
@@ -47,6 +50,17 @@ Debe producir:
 - metodología;
 - limitaciones;
 - hashes SHA-256 de fuentes.
+
+## Prueba de aceptación CLI real
+
+```powershell
+python -m unittest tests.test_phase13_acceptance_cli -v
+```
+
+Debe demostrar:
+
+1. `python scripts\generate_report_debug_run.py --output ...` funciona como comando real y no produce `ModuleNotFoundError`.
+2. El flujo público generador → `python nettwin.py report ...` termina con exit code 0 y produce los artefactos canónicos.
 
 ## Run real de Fase 12
 
