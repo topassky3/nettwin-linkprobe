@@ -82,6 +82,17 @@ def _median_or_none(series: pd.Series) -> float | None:
     return float(clean.median())
 
 
+def _loss_percentages(group: pd.DataFrame) -> pd.Series:
+    sent = pd.to_numeric(group["packets_sent"], errors="coerce")
+    received = pd.to_numeric(group["packets_received"], errors="coerce")
+    valid = sent.notna() & received.notna() & (sent > 0)
+    result = pd.Series(np.nan, index=group.index, dtype="float64")
+    if valid.any():
+        lost = (sent[valid] - received[valid]).clip(lower=0.0)
+        result.loc[valid] = (lost / sent[valid]) * 100.0
+    return result
+
+
 def _threshold_from_baseline(
     baseline: float | None,
     *,
@@ -119,7 +130,9 @@ def _prepare_interface_timeline(
     overlap_end: pd.Timestamp,
     thresholds: EventThresholds,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    work = interface[(interface["timestamp"] >= overlap_start) & (interface["timestamp"] <= overlap_end)].copy()
+    work = interface[
+        (interface["timestamp"] >= overlap_start) & (interface["timestamp"] <= overlap_end)
+    ].copy()
     _to_numeric(
         work,
         (
@@ -152,7 +165,6 @@ def _prepare_interface_timeline(
         "rx_rate_mbps": _median_or_none(work["rx_rate_mbps"]),
         "tx_rate_mbps": _median_or_none(work["tx_rate_mbps"]),
     }
-
     return grouped, baselines
 
 
@@ -163,7 +175,9 @@ def _prepare_probe_timeline(
     overlap_end: pd.Timestamp,
     thresholds: EventThresholds,
 ) -> tuple[pd.DataFrame, dict[str, dict[str, float | None]]]:
-    work = probes[(probes["timestamp"] >= overlap_start) & (probes["timestamp"] <= overlap_end)].copy()
+    work = probes[
+        (probes["timestamp"] >= overlap_start) & (probes["timestamp"] <= overlap_end)
+    ].copy()
     _to_numeric(work, ("packets_sent", "packets_received", "rtt_ms", "delay_variation_ms"))
     if "reachability_bool" in work:
         work["reachability_bool"] = _bool_series(work["reachability_bool"])
@@ -177,11 +191,14 @@ def _prepare_probe_timeline(
         return pd.DataFrame(), {}
 
     work["bucket"] = _floor_bucket(work["timestamp"], thresholds.bucket_seconds)
+    work["sample_loss_pct"] = _loss_percentages(work)
+
     baselines: dict[str, dict[str, float | None]] = {}
     for target, group in work.groupby("target", sort=True):
         baselines[str(target)] = {
             "rtt_ms": _median_or_none(group["rtt_ms"]),
             "delay_variation_ms": _median_or_none(group["delay_variation_ms"]),
+            "packet_loss_pct": _median_or_none(group["sample_loss_pct"]),
         }
 
     rows: list[dict[str, Any]] = []
@@ -214,12 +231,14 @@ def _build_timeline(
     probe_baselines: dict[str, dict[str, float | None]],
     thresholds: EventThresholds,
 ) -> pd.DataFrame:
-    buckets = sorted(set(interface_bucketed.get("bucket", [])) | set(probe_bucketed.get("bucket", [])))
-    rows: list[dict[str, Any]] = []
+    buckets = sorted(
+        set(interface_bucketed.get("bucket", [])) | set(probe_bucketed.get("bucket", []))
+    )
     interface_lookup = (
         interface_bucketed.set_index("bucket").to_dict(orient="index")
         if not interface_bucketed.empty else {}
     )
+    rows: list[dict[str, Any]] = []
 
     for bucket in buckets:
         iface = interface_lookup.get(bucket, {})
@@ -284,8 +303,9 @@ def _build_timeline(
         variation_hits: list[dict[str, Any]] = []
         loss_hits: list[dict[str, Any]] = []
         for target_row in target_rows:
-            target = target_row["target"]
+            target = str(target_row["target"])
             baseline = probe_baselines.get(target, {})
+
             rtt = target_row.get("rtt_ms")
             if rtt is not None and pd.notna(rtt):
                 rtt_threshold = _threshold_from_baseline(
@@ -319,10 +339,14 @@ def _build_timeline(
 
             loss = target_row.get("packet_loss_pct")
             if loss is not None and pd.notna(loss):
-                if float(loss) >= thresholds.packet_loss_pct or not bool(target_row.get("reachability", True)):
+                if (
+                    float(loss) >= thresholds.packet_loss_pct
+                    or not bool(target_row.get("reachability", True))
+                ):
                     loss_hits.append({
                         "target": target,
                         "loss_pct": float(loss),
+                        "baseline_pct": baseline.get("packet_loss_pct"),
                         "reachability": bool(target_row.get("reachability", False)),
                         "threshold_pct": thresholds.packet_loss_pct,
                     })
@@ -352,7 +376,6 @@ def _build_timeline(
             "event_candidate": len(metrics) >= thresholds.min_metrics_changed,
             "evidence_detail": detail,
         })
-
     return pd.DataFrame(rows)
 
 
@@ -374,7 +397,11 @@ def _confidence(max_metrics: int, bucket_count: int) -> str:
     return "BAJA"
 
 
-def _make_event(event_id: str, rows: pd.DataFrame, thresholds: EventThresholds) -> dict[str, Any]:
+def _make_event(
+    event_id: str,
+    rows: pd.DataFrame,
+    thresholds: EventThresholds,
+) -> dict[str, Any]:
     rows = rows.sort_values("timestamp")
     start = rows["timestamp"].iloc[0]
     last_bucket = rows["timestamp"].iloc[-1]
@@ -419,7 +446,10 @@ def _make_event(event_id: str, rows: pd.DataFrame, thresholds: EventThresholds) 
     }
 
 
-def _extract_events(timeline: pd.DataFrame, thresholds: EventThresholds) -> list[dict[str, Any]]:
+def _extract_events(
+    timeline: pd.DataFrame,
+    thresholds: EventThresholds,
+) -> list[dict[str, Any]]:
     if timeline.empty:
         return []
     candidates = timeline[timeline["event_candidate"]].copy()
@@ -431,7 +461,10 @@ def _extract_events(timeline: pd.DataFrame, thresholds: EventThresholds) -> list
     previous_ts: pd.Timestamp | None = None
     for idx, row in candidates.iterrows():
         timestamp = row["timestamp"]
-        if previous_ts is None or (timestamp - previous_ts).total_seconds() <= thresholds.merge_gap_seconds:
+        if (
+            previous_ts is None
+            or (timestamp - previous_ts).total_seconds() <= thresholds.merge_gap_seconds
+        ):
             current.append(idx)
         else:
             groups.append(current)
@@ -440,10 +473,10 @@ def _extract_events(timeline: pd.DataFrame, thresholds: EventThresholds) -> list
     if current:
         groups.append(current)
 
-    events: list[dict[str, Any]] = []
-    for number, indexes in enumerate(groups, start=1):
-        events.append(_make_event(f"EVENT-{number:03d}", timeline.loc[indexes], thresholds))
-    return events
+    return [
+        _make_event(f"EVENT-{number:03d}", timeline.loc[indexes], thresholds)
+        for number, indexes in enumerate(groups, start=1)
+    ]
 
 
 def analyze_events(
@@ -466,7 +499,7 @@ def analyze_events(
     interface = _load_csv(interface_processed_csv, interface_required, "de interfaz procesada")
     probes = _load_csv(probe_processed_csv, probe_required, "de sondas procesadas")
     overlap = _temporal_overlap(interface, probes)
-    public_overlap = {k: v for k, v in overlap.items() if not k.startswith("_")}
+    public_overlap = {key: value for key, value in overlap.items() if not key.startswith("_")}
 
     metadata: dict[str, Any] = {
         "mode": "event-engine",
@@ -475,10 +508,19 @@ def analyze_events(
         "thresholds": asdict(thresholds),
         "event_detection_executed": False,
         "event_count": 0,
+        "baseline_methodology": {
+            "rtt_ms": "mediana por target sobre muestras válidas dentro de la ventana solapada",
+            "delay_variation_ms": "mediana por target sobre muestras válidas dentro de la ventana solapada",
+            "packet_loss_pct": (
+                "mediana por target del porcentaje de pérdida por muestra válida "
+                "dentro de la ventana solapada"
+            ),
+        },
         "limitations": [
             "Event Engine identifica coincidencias temporales y no demuestra causalidad.",
             "La severidad representa intensidad del detector según señales simultáneas, no impacto comercial ni SLA.",
             "La confianza corresponde a la detección del evento, no a una hipótesis causal.",
+            "El baseline de pérdida es descriptivo de la ventana observada y no representa pérdida histórica del servicio.",
         ],
     }
 
@@ -513,7 +555,9 @@ def analyze_events(
     metadata["interface_baselines"] = interface_baselines
     metadata["probe_baselines"] = probe_baselines
     metadata["timeline_buckets"] = int(len(timeline))
-    metadata["candidate_buckets"] = int(timeline["event_candidate"].sum()) if not timeline.empty else 0
+    metadata["candidate_buckets"] = (
+        int(timeline["event_candidate"].sum()) if not timeline.empty else 0
+    )
     return EventResult(events=events, timeline=timeline, metadata=metadata)
 
 
@@ -525,10 +569,7 @@ def write_events(result: EventResult, output_dir: str | Path) -> Path:
     timeline_path = output / "event_timeline.csv"
     summary_path = output / "event_summary.csv"
 
-    payload = {
-        "metadata": result.metadata,
-        "events": result.events,
-    }
+    payload = {"metadata": result.metadata, "events": result.events}
     events_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
