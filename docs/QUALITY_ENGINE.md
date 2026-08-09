@@ -6,6 +6,19 @@ El Quality Engine transforma los CSV crudos de `collect-interface` y `collect-pr
 
 Describe exclusivamente la ventana observada. No estima disponibilidad histórica, crecimiento mensual, fecha de saturación ni capacidad futura.
 
+## Ventanas temporales y solapamiento
+
+El Quality Engine registra por separado:
+
+- ventana de muestras de interfaz;
+- ventana de sondas;
+- solapamiento temporal entre ambas;
+- span total desde la primera hasta la última muestra de cualquier fuente.
+
+La duración útil para futuras correlaciones es el **solapamiento**, no el span total. Si las dos fuentes no se solapan, el manifiesto registra `temporal_overlap.exists = false`, `duration_seconds = 0` y añade una limitación explícita indicando que esas series no deben correlacionarse entre sí en esa ejecución.
+
+Esto evita interpretar como una sola ventana conjunta dos capturas realizadas en momentos diferentes.
+
 ## RTT
 
 Por target, usando únicamente valores RTT disponibles:
