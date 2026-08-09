@@ -1,33 +1,108 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 from pathlib import Path
 import socket
+from typing import Any
 
 import psutil
 
 
-def _pick_interface() -> str:
-    stats = psutil.net_if_stats()
-    counters = psutil.net_io_counters(pernic=True)
-    addresses = psutil.net_if_addrs()
-    candidates: list[str] = []
-    fallback: list[str] = []
+_VIRTUAL_HINTS = (
+    "tailscale",
+    "loopback",
+    "virtual",
+    "vethernet",
+    "hyper-v",
+    "vmware",
+    "virtualbox",
+    "vpn",
+    "tap",
+    "tun",
+    "docker",
+    "wsl",
+    "zerotier",
+    "wireguard",
+)
+
+_PHYSICAL_HINTS = (
+    "wi-fi",
+    "wifi",
+    "wireless",
+    "wlan",
+    "ethernet",
+    "eth",
+    "en",
+)
+
+
+def _is_virtual_name(name: str) -> bool:
+    lowered = name.lower()
+    return any(hint in lowered for hint in _VIRTUAL_HINTS)
+
+
+def _is_physical_name(name: str) -> bool:
+    lowered = name.lower()
+    if _is_virtual_name(name):
+        return False
+    return any(
+        lowered == hint
+        or lowered.startswith(hint + " ")
+        or lowered.startswith(hint)
+        for hint in _PHYSICAL_HINTS
+    )
+
+
+def _ipv4_quality(addresses: list[Any]) -> int:
+    best = 0
+    for item in addresses:
+        if getattr(item, "family", None) != socket.AF_INET:
+            continue
+        raw = str(getattr(item, "address", "") or "")
+        try:
+            address = ipaddress.ip_address(raw)
+        except ValueError:
+            continue
+        if address.is_loopback:
+            best = max(best, 0)
+        elif address.is_link_local:
+            best = max(best, 10)
+        else:
+            best = max(best, 40)
+    return best
+
+
+def _interface_score(name: str, addresses: list[Any]) -> tuple[int, str]:
+    score = _ipv4_quality(addresses)
+    if _is_physical_name(name):
+        score += 100
+    if _is_virtual_name(name):
+        score -= 100
+    return score, name.lower()
+
+
+def _pick_interface(provider: Any = psutil) -> str:
+    stats = provider.net_if_stats()
+    counters = provider.net_io_counters(pernic=True)
+    addresses = provider.net_if_addrs()
+    ranked: list[tuple[int, str, str]] = []
+
     for name in sorted(set(stats) | set(counters) | set(addresses)):
         stat = stats.get(name)
         if stat is None or not bool(stat.isup) or name not in counters:
             continue
-        fallback.append(name)
-        for item in addresses.get(name, []):
-            if item.family == socket.AF_INET and str(item.address) != "127.0.0.1":
-                candidates.append(name)
-                break
-    if candidates:
-        return candidates[0]
-    if fallback:
-        return fallback[0]
-    raise SystemExit("No se encontró una interfaz UP con contadores; use --interface manualmente.")
+        score, lexical = _interface_score(name, list(addresses.get(name, [])))
+        ranked.append((score, lexical, name))
+
+    if not ranked:
+        raise SystemExit(
+            "No se encontró una interfaz UP con contadores; use --interface manualmente."
+        )
+
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    return ranked[0][2]
 
 
 def main() -> int:
@@ -87,6 +162,11 @@ def main() -> int:
     print(f"Config: {config_path}")
     print(f"Salida esperada: {root / 'run' / 'preflight.json'}")
     print("Target de documentación: 192.0.2.1 (NO se envían sondas en preflight).")
+    if _is_virtual_name(interface):
+        print(
+            "AVISO: solo se encontró/seleccionó una interfaz con apariencia virtual; "
+            "para el piloto real use --interface explícito según autorización del ISP."
+        )
     return 0
 
 
