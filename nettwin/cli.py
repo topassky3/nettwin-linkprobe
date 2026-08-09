@@ -9,6 +9,7 @@ from . import __version__
 from .analytics import analyze
 from .config import load_config
 from .demo_data import generate_demo_csv
+from .host_collector import collect_host
 from .interface_collector import collect_interface, list_interfaces
 from .io import DataValidationError, load_and_validate_csv
 from .link_audit import analyze_link_audit, write_link_audit
@@ -58,6 +59,16 @@ def build_parser() -> argparse.ArgumentParser:
     limit_group = collect_parser.add_mutually_exclusive_group(required=True)
     limit_group.add_argument("--samples", type=int, help="Número exacto de muestras")
     limit_group.add_argument("--duration", type=float, help="Duración aproximada en segundos")
+
+    host_parser = subparsers.add_parser(
+        "collect-host",
+        help="Capturar CPU, RAM, load average y uptime del host",
+    )
+    host_parser.add_argument("--output", "-o", default="runs/host_samples.csv", help="CSV de salida")
+    host_parser.add_argument("--interval", type=float, default=5.0, help="Segundos entre muestras")
+    host_limit_group = host_parser.add_mutually_exclusive_group(required=True)
+    host_limit_group.add_argument("--samples", type=int, help="Número exacto de muestras")
+    host_limit_group.add_argument("--duration", type=float, help="Duración aproximada en segundos")
 
     validate_parser = subparsers.add_parser("validar", help="Validar la estructura de un CSV")
     validate_parser.add_argument("csv", help="Ruta al archivo CSV")
@@ -118,6 +129,18 @@ def main(argv: list[str] | None = None) -> int:
             )
             print("Captura de interfaz completada.")
             print(f"Interfaz: {args.interface}")
+            print(f"Intervalo: {args.interval} s")
+            print(f"Archivo: {path.resolve()}")
+            return 0
+
+        if args.command == "collect-host":
+            path = collect_host(
+                output=args.output,
+                interval_seconds=args.interval,
+                samples=args.samples,
+                duration_seconds=args.duration,
+            )
+            print("Captura del host completada.")
             print(f"Intervalo: {args.interval} s")
             print(f"Archivo: {path.resolve()}")
             return 0
