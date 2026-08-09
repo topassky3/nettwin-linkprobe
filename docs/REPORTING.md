@@ -2,9 +2,9 @@
 
 ## Objetivo
 
-Fase 13 transforma un run sellado de NetTwin LinkProbe en un informe técnico reproducible y defendible.
+Transformar un run sellado de LinkProbe en un informe técnico reproducible sin modificar la evidencia original.
 
-El orden es obligatorio:
+El flujo público es:
 
 ```text
 run sellado
@@ -15,33 +15,22 @@ run sellado
   -> Correlation Engine
   -> Evidence Engine
   -> Event Fingerprints
+  -> analysis.json
   -> report.json
   -> report.html
   -> report.pdf opcional
 ```
 
-El informe se escribe **fuera** del directorio sellado del run. Esto evita que la generación del reporte convierta los artefactos nuevos en archivos no rastreados del dataset original.
+## Regla de evidencia
 
-## CLI
+El informe se genera siempre fuera del directorio sellado. `checksums.sha256` y los archivos crudos no se modifican.
 
-```powershell
-python nettwin.py report `
-  --run runs\HACHENET-20260809-LINK01-001 `
-  --output reports\HACHENET-20260809-LINK01-001 `
-  --company "HacheNet" `
-  --link "LINK-01" `
-  --capacity-mbps 100
-```
-
-`--capacity-mbps` es opcional. Si no existe una capacidad explícita en el CLI o en `experiment_config.json`, la utilización permanece `N/D`. Nunca se usa `reported_link_speed_mbps` como sustituto de capacidad del servicio.
-
-`--pdf` intenta utilizar WeasyPrint si está disponible. HTML siempre es la salida primaria y no depende de Internet, CDN ni JavaScript externo.
+Toda métrica no medible permanece `null` en JSON y `N/D` en HTML. La velocidad reportada por la NIC nunca sustituye la capacidad explícita del servicio.
 
 ## Dataset Quality Gate
 
-Antes de ejecutar conclusiones se revisa:
+Antes de ejecutar conclusiones se revisan:
 
-- integridad SHA-256;
 - muestras esperadas, recibidas y válidas;
 - cobertura;
 - timestamps inválidos;
@@ -77,6 +66,7 @@ Un target no alcanzable se considera una condición observada y genera advertenc
 reports/<RUN_ID>/
 ├── dataset_quality.json
 ├── dataset_quality_summary.csv
+├── analysis.json
 ├── report.json
 ├── report.html
 ├── report.pdf                  # solo con --pdf y WeasyPrint
@@ -105,90 +95,96 @@ reports/<RUN_ID>/
 La portada contiene:
 
 - empresa;
-- Link Health Audit;
 - enlace;
 - run_id;
-- ventana observada;
 - versión del sensor;
-- inicio y fin.
+- ventana observada;
+- duración;
+- estado de integridad;
+- estado del Quality Gate.
 
-El resumen ejecutivo se genera únicamente a partir de los resultados medidos. Si Quality Gate falla, indica explícitamente que las conclusiones técnicas están bloqueadas.
+El resumen ejecutivo distingue explícitamente hechos observados de hipótesis. Si no existen findings, no se generan recomendaciones específicas ni se inventa una causa.
 
 ## Tabla principal
 
 Incluye, cuando son medibles:
 
 - disponibilidad observada;
-- RTT mediano;
-- RTT P95;
-- RTT P99;
-- pérdida observada;
-- delay variation P95;
-- utilización media;
-- utilización P95;
-- utilización máxima;
-- RX drops;
-- TX drops;
-- eventos relevantes.
-
-Todo valor no medible aparece como `null` en `report.json` y `N/D` en HTML.
-
-## Línea temporal maestra
-
-`report.html` genera SVG autocontenido para:
-
-- utilización;
-- RTT;
-- variación temporal de retardo;
+- RTT mediano/P95/P99;
 - pérdida;
+- variación temporal de RTT;
+- utilización media/P95/máxima solo con capacidad explícita;
 - drops;
-- CPU del host.
+- número de eventos.
 
-Todos usan la misma escala temporal global. Esto facilita observar coincidencia temporal entre métricas sin convertirla en causalidad.
+## Timeline
 
-## Eventos y Evidence Engine
+El HTML incorpora SVG autocontenido para las series disponibles, sin CDN ni JavaScript externo. Las métricas no disponibles se muestran como `N/D`.
 
-Cada hallazgo muestra:
+## Eventos y evidencia
+
+Cada finding conserva la cadena:
 
 ```text
 HECHO
-INTERPRETACIÓN
-HIPÓTESIS
-CONFIANZA
-RECOMENDACIÓN
+-> INTERPRETACIÓN
+-> HIPÓTESIS
+-> CONFIANZA
+-> RECOMENDACIÓN
 ```
 
-También incorpora el fingerprint del evento y una gráfica de señales simultáneas por bucket.
-
-Las recomendaciones provienen del Evidence Engine y se relacionan con evidencia concreta. Si no hay hallazgos, el informe no inventa recomendaciones técnicas para llenar espacio.
-
-## Limitaciones obligatorias
-
-El informe conserva explícitamente, entre otras, estas limitaciones:
-
-- una ventana de cuatro horas caracteriza solo el periodo observado;
-- disponibilidad observada no equivale a SLA histórico;
-- correlación no implica causalidad;
-- no se afirma causa física exacta sin evidencia;
-- valores no medibles quedan N/D.
-
-## Etapa comercial
-
-Solo se muestra después de los resultados técnicos y únicamente cuando existen hallazgos Evidence Engine. Se presenta como una posible continuación para confirmar el comportamiento, no como conclusión técnica.
+`causal_claim_allowed=false`. Correlación y coincidencia temporal no se presentan como causalidad.
 
 ## Reproducibilidad
 
-`report.json` no incorpora la hora de generación de pared. Usa timestamps del run y hashes SHA-256 de las fuentes.
+`report.json`, `report.html` y `analysis.json` son deterministas para el mismo run/configuración. No se incluye un timestamp de generación tomado del reloj de pared.
 
-Dos reportes generados con:
+El reporte incorpora SHA-256 de las fuentes y `report_sha256`.
 
-- mismo run;
-- misma configuración;
-- misma versión de software;
-- mismos argumentos;
+## PDF
 
-deben producir `report.json` y `report.html` idénticos byte a byte.
+`--pdf` intenta generar `report.pdf` con WeasyPrint. Si la dependencia no está disponible, HTML sigue siendo la salida canónica y el CLI informa el motivo.
 
-## Seguridad
+## Validación operacional
 
-Report Engine es offline respecto del enlace. No ejecuta probes, no resuelve targets, no captura payload, no modifica routing/firewall/interfaces y no inspecciona comunicaciones. Solo lee el run existente y escribe en el directorio externo de reporte.
+Además de unit tests, Fase 13 incluye smoke tests de caja negra que ejecutan los mismos entrypoints públicos usados desde PowerShell:
+
+```powershell
+python -m unittest tests.test_phase13_acceptance_cli -v
+```
+
+Los smoke tests ejecutan:
+
+```text
+python scripts/generate_report_debug_run.py --output ...
+python nettwin.py report --run ... --output ...
+```
+
+y validan exit codes y artefactos JSON/HTML reales.
+
+### Portabilidad de stdout en Windows
+
+Los tests no fuerzan `encoding="utf-8"` al capturar `subprocess`. El proceso padre usa la codificación local compatible con el proceso hijo. Además, la aceptación no depende de comparar frases acentuadas como `VÁLIDA` o `SÍ`: los estados canónicos se validan mediante exit code, `dataset_quality.json`, `report.json` y `analysis.json`.
+
+Esto evita falsos negativos causados exclusivamente por la página de códigos de la consola de Windows.
+
+## Comando público
+
+```powershell
+python nettwin.py report `
+  --run <run_dir> `
+  --output <report_dir> `
+  --company "HacheNet" `
+  --link "LINK-01"
+```
+
+Capacidad conocida de forma explícita:
+
+```powershell
+python nettwin.py report `
+  --run <run_dir> `
+  --output <report_dir> `
+  --capacity-mbps 100
+```
+
+Nunca inferir capacidad del servicio desde `reported_link_speed_mbps`.
