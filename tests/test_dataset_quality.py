@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import warnings
 
 from nettwin.dataset_quality import assess_dataset_quality, write_dataset_quality
 from scripts.generate_report_debug_run import generate
@@ -104,7 +105,13 @@ class DatasetQualityTests(unittest.TestCase):
             rows = self._rows(path)
             rows[0]["timestamp"] = "NO-ES-FECHA"
             self._rewrite_csv(path, rows)
-            result = assess_dataset_quality(run, integrity_valid=True)
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Could not infer format.*",
+                    category=UserWarning,
+                )
+                result = assess_dataset_quality(run, integrity_valid=True)
             self.assertEqual(result.status, "FAIL")
             self.assertFalse(result.safe_for_conclusions)
             self.assertEqual(result.summary["invalid_timestamps_total"], 1)
