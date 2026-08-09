@@ -98,12 +98,13 @@ def _downgrade_mismatched_gateway(payload: dict[str, Any]) -> None:
 def _prepare_bom_compatible_config(config_path: str | Path) -> tuple[Path, Path | None]:
     """Normaliza temporalmente UTF-8 BOM sin cambiar el archivo del usuario.
 
-    El archivo temporal se crea junto al original para conservar la semántica
-    de rutas relativas de la configuración. El SHA-256 registrado se corrige
-    después para representar los bytes originales suministrados por el
-    administrador.
+    Si la ruta no existe o no es JSON, no se intercepta: el motor conserva su
+    validación y sus mensajes de error habituales.
     """
     original = Path(config_path).resolve()
+    if not original.exists() or not original.is_file() or original.suffix.lower() != ".json":
+        return original, None
+
     raw = original.read_bytes()
     if not raw.startswith(b"\xef\xbb\xbf"):
         return original, None
@@ -177,8 +178,9 @@ def run_preflight(*args: Any, redact_local_addresses: bool = False, **kwargs: An
         if redact_local_addresses:
             _redact_addresses(result.payload)
 
-        if temporary_config is not None or redact_local_addresses or result.payload.get("gateway", {}).get("selected_interface_match") is False:
-            _rewrite_artifact(result)
+        # El artefacto debe reflejar exactamente el payload final, incluida la
+        # decisión sobre pertenencia del gateway y cualquier redacción.
+        _rewrite_artifact(result)
         return result
     finally:
         if temporary_config is not None:
