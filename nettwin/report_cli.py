@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
-from nettwin.report_engine import ReportConfig, generate_report
+from nettwin.report_engine import ReportConfig, ReportResult, generate_report
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,6 +35,34 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def write_analysis_manifest(result: ReportResult) -> Path:
+    report = json.loads(result.report_json.read_text(encoding="utf-8"))
+    payload = {
+        "schema_version": "linkprobe-analysis-v1",
+        "run_id": report.get("run_id"),
+        "analysis_executed": bool(report.get("analysis_executed")),
+        "safe_for_conclusions": bool(report.get("dataset_quality", {}).get("safe_for_conclusions")),
+        "quality_status": report.get("dataset_quality", {}).get("status"),
+        "capacity_mbps": report.get("capacity_mbps"),
+        "primary_target": report.get("primary_target"),
+        "event_count": len(report.get("events", [])),
+        "finding_count": len(report.get("findings", [])),
+        "fingerprint_count": len(report.get("fingerprints", [])),
+        "headline_metrics": report.get("headline_metrics", {}),
+        "analysis_artifacts": report.get("analysis_artifacts", {}),
+        "source_sha256": report.get("source_sha256", {}),
+        "report_sha256": report.get("report_sha256"),
+        "limitations": report.get("limitations", []),
+        "causal_inference_performed": False,
+    }
+    path = result.output_dir / "analysis.json"
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return path
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -48,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
                 render_pdf=bool(args.pdf),
             ),
         )
+        analysis_manifest = write_analysis_manifest(result)
     except ValueError as exc:
         parser.error(str(exc))
         return 2
@@ -58,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Quality Gate: {result.quality_status}")
     print(f"Conclusiones habilitadas: {'SÍ' if result.safe_for_conclusions else 'NO'}")
     print(f"Pipeline analítico ejecutado: {'SÍ' if result.analysis_executed else 'NO'}")
+    print(f"Analysis: {analysis_manifest}")
     print(f"JSON: {result.report_json}")
     print(f"HTML: {result.report_html}")
     if args.pdf:
