@@ -62,9 +62,8 @@ def _prepare_interface(df: pd.DataFrame, capacity_mbps: float | None) -> tuple[p
         work["sample_ok"] = True
 
     # Los deltas del collector se calculan contra la última lectura válida de
-    # contadores. Por tanto, si existe una fila de error intermedia, el tiempo
-    # para calcular el rate debe abarcar también ese hueco y no solo el último
-    # intervalo nominal.
+    # contadores. Si existe una fila de error intermedia, el tiempo del rate
+    # debe abarcar también ese hueco.
     work["elapsed_seconds"] = np.nan
     for _, group in work.groupby("interface", sort=False):
         valid_index = group.index[group["sample_ok"]]
@@ -189,25 +188,58 @@ def analyze_quality(
     interface_processed, interface_summary = _prepare_interface(interface_df, capacity_mbps)
     probe_processed, probe_summary = _prepare_probes(probe_df)
 
-    first_ts = min(interface_df["timestamp"].min(), probe_df["timestamp"].min())
-    last_ts = max(interface_df["timestamp"].max(), probe_df["timestamp"].max())
+    interface_first = interface_df["timestamp"].min()
+    interface_last = interface_df["timestamp"].max()
+    probe_first = probe_df["timestamp"].min()
+    probe_last = probe_df["timestamp"].max()
+
+    union_first = min(interface_first, probe_first)
+    union_last = max(interface_last, probe_last)
+    overlap_start = max(interface_first, probe_first)
+    overlap_end = min(interface_last, probe_last)
+    has_overlap = bool(overlap_end >= overlap_start)
+    overlap_seconds = float(max(0.0, (overlap_end - overlap_start).total_seconds())) if has_overlap else 0.0
+
+    limitations = [
+        "La disponibilidad describe únicamente la ventana observada.",
+        "La velocidad reportada por la NIC no se usa como capacidad del enlace del ISP.",
+        "La variación temporal de RTT no se presenta como jitter unidireccional.",
+    ]
+    if not has_overlap:
+        limitations.append(
+            "Las muestras de interfaz y sondas no se solapan temporalmente; no deben correlacionarse entre sí en esta ejecución."
+        )
+
     metadata: dict[str, Any] = {
         "mode": "quality-engine",
         "scope": "observed_window_only",
-        "first_timestamp": first_ts.isoformat(),
-        "last_timestamp": last_ts.isoformat(),
-        "duration_seconds": float(max(0.0, (last_ts - first_ts).total_seconds())),
+        "interface_window": {
+            "first_timestamp": interface_first.isoformat(),
+            "last_timestamp": interface_last.isoformat(),
+            "duration_seconds": float(max(0.0, (interface_last - interface_first).total_seconds())),
+        },
+        "probe_window": {
+            "first_timestamp": probe_first.isoformat(),
+            "last_timestamp": probe_last.isoformat(),
+            "duration_seconds": float(max(0.0, (probe_last - probe_first).total_seconds())),
+        },
+        "temporal_overlap": {
+            "exists": has_overlap,
+            "first_timestamp": overlap_start.isoformat() if has_overlap else None,
+            "last_timestamp": overlap_end.isoformat() if has_overlap else None,
+            "duration_seconds": overlap_seconds,
+        },
+        "union_first_timestamp": union_first.isoformat(),
+        "union_last_timestamp": union_last.isoformat(),
+        "union_span_seconds": float(max(0.0, (union_last - union_first).total_seconds())),
+        "duration_seconds": overlap_seconds,
         "capacity_mbps": capacity_mbps,
         "availability_definition": "porcentaje de ciclos con reachability=True durante la ventana observada por target",
         "loss_definition": "(paquetes_enviados - paquetes_recibidos) / paquetes_enviados * 100, agregado por target",
         "delay_variation_definition": "abs(RTT mediano actual - RTT mediano anterior) por target; no es jitter unidireccional",
         "rate_definition": "bytes_delta * 8 / segundos transcurridos desde la última lectura válida de contadores / 1e6",
         "utilization_definition": "max(rx_rate_mbps, tx_rate_mbps) / capacity_mbps * 100; solo si capacity_mbps fue suministrada explícitamente",
-        "limitations": [
-            "La disponibilidad describe únicamente la ventana observada.",
-            "La velocidad reportada por la NIC no se usa como capacidad del enlace del ISP.",
-            "La variación temporal de RTT no se presenta como jitter unidireccional.",
-        ],
+        "limitations": limitations,
     }
     return QualityResult(
         interface_summary=interface_summary,
