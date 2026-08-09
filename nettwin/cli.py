@@ -14,6 +14,7 @@ from .host_collector import collect_host
 from .interface_collector import collect_interface, list_interfaces
 from .io import DataValidationError, load_and_validate_csv
 from .link_audit import analyze_link_audit, write_link_audit
+from .quality_engine import analyze_quality, write_quality
 from .reporting import generate_report
 
 
@@ -101,6 +102,19 @@ def build_parser() -> argparse.ArgumentParser:
     probes_limit_group = probes_parser.add_mutually_exclusive_group(required=True)
     probes_limit_group.add_argument("--cycles", type=int, help="Número de ciclos de medición")
     probes_limit_group.add_argument("--duration", type=float, help="Duración aproximada en segundos")
+
+    quality_parser = subparsers.add_parser(
+        "analyze-quality",
+        help="Calcular métricas de calidad sobre la ventana observada",
+    )
+    quality_parser.add_argument("--interface-csv", required=True, help="CSV generado por collect-interface")
+    quality_parser.add_argument("--probe-csv", required=True, help="CSV generado por collect-probes")
+    quality_parser.add_argument(
+        "--capacity-mbps",
+        type=float,
+        help="Capacidad autorizada/conocida del enlace para calcular utilización; no se infiere de la NIC",
+    )
+    quality_parser.add_argument("--output", "-o", default="resultados_quality", help="Directorio de salida")
 
     validate_parser = subparsers.add_parser("validar", help="Validar la estructura de un CSV")
     validate_parser.add_argument("csv", help="Ruta al archivo CSV")
@@ -195,6 +209,28 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Payload ICMP: {args.payload_bytes} bytes")
             print(f"Payload saliente estimado por ciclo: {estimated_per_cycle} bytes")
             print(f"Archivo: {path.resolve()}")
+            return 0
+
+        if args.command == "analyze-quality":
+            quality = analyze_quality(
+                interface_csv=args.interface_csv,
+                probe_csv=args.probe_csv,
+                capacity_mbps=args.capacity_mbps,
+            )
+            manifest_path = write_quality(quality, args.output)
+            print("Quality Engine completado correctamente.")
+            print("Alcance: únicamente ventana observada")
+            print(f"Interfaces analizadas: {len(quality.interface_summary)}")
+            print(f"Targets analizados: {len(quality.probe_summary)}")
+            if args.capacity_mbps is None:
+                print("Utilización: N/D (no se suministró capacidad explícita del enlace)")
+            else:
+                print(f"Capacidad usada para utilización: {args.capacity_mbps} Mbps")
+            print("\nInterfaces:")
+            print(quality.interface_summary.to_string(index=False))
+            print("\nTargets:")
+            print(quality.probe_summary.to_string(index=False))
+            print(f"\nResumen: {manifest_path.resolve()}")
             return 0
 
         validation = load_and_validate_csv(args.csv, getattr(args, "mapping", None))
