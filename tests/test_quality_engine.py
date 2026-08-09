@@ -67,6 +67,28 @@ class QualityEngineTests(unittest.TestCase):
         self.assertEqual(row["rx_drops_delta_total"], 2)
         self.assertEqual(row["tx_drops_delta_total"], 3)
 
+    def test_rate_spans_from_previous_valid_sample_after_transient_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            interface_path, probe_path = self._write_inputs(root)
+            interface = pd.read_csv(interface_path)
+            error_row = interface.iloc[[1]].copy()
+            error_row["timestamp"] = "2026-08-09T16:00:10+00:00"
+            error_row["sample_status"] = "error"
+            for column in ["rx_bytes_delta", "tx_bytes_delta", "rx_errors_delta", "tx_errors_delta", "rx_drops_delta", "tx_drops_delta"]:
+                error_row[column] = None
+            recovered = interface.iloc[[2]].copy()
+            recovered["timestamp"] = "2026-08-09T16:00:20+00:00"
+            recovered["rx_bytes_delta"] = 20_000_000
+            recovered["tx_bytes_delta"] = 10_000_000
+            transient = pd.concat([interface.iloc[[0]], error_row, recovered], ignore_index=True)
+            transient.to_csv(interface_path, index=False)
+            result = analyze_quality(interface_path, probe_path, capacity_mbps=20)
+        recovered_row = result.interface_processed.iloc[2]
+        self.assertAlmostEqual(recovered_row["elapsed_seconds"], 20.0)
+        self.assertAlmostEqual(recovered_row["rx_rate_mbps"], 8.0)
+        self.assertAlmostEqual(recovered_row["tx_rate_mbps"], 4.0)
+
     def test_nic_reported_speed_is_not_used_as_link_capacity(self):
         with tempfile.TemporaryDirectory() as tmp:
             interface_path, probe_path = self._write_inputs(Path(tmp))
