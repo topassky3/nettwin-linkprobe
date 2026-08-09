@@ -9,6 +9,7 @@ from . import __version__
 from .active_probe import ProbeTarget, collect_probes
 from .analytics import analyze
 from .config import load_config
+from .correlation_engine import CorrelationConfig, analyze_correlations, write_correlations
 from .demo_data import generate_demo_csv
 from .event_engine import EventThresholds, analyze_events, write_events
 from .host_collector import collect_host
@@ -59,7 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     audit_parser.add_argument("csv", help="Ruta al CSV de la ventana observada")
     audit_parser.add_argument("--output", "-o", default="resultados_link_audit", help="Directorio de salida")
-    audit_parser.add_argument("--mapping", help="JSON opcional: columna_origen -> columna_canonica")
+    audit_parser.add_argument("--mapping", help="JSON opcional de mapeo de columnas")
 
     subparsers.add_parser("interfaces", help="Listar interfaces de red visibles para el sensor")
 
@@ -146,6 +147,49 @@ def build_parser() -> argparse.ArgumentParser:
     events_parser.add_argument("--rate-delta-mbps", type=float, default=1.0, help="Incremento mínimo de rate si utilización es N/D")
     events_parser.add_argument("--drops-delta", type=float, default=1.0, help="Deltas de drops para activar señal")
     events_parser.add_argument("--errors-delta", type=float, default=1.0, help="Deltas de errors para activar señal")
+
+    correlations_parser = subparsers.add_parser(
+        "analyze-correlations",
+        help="Calcular asociaciones temporales de Spearman sin inferir causalidad",
+    )
+    correlations_parser.add_argument(
+        "--interface-csv",
+        required=True,
+        help="quality_interface_processed.csv generado por Quality Engine",
+    )
+    correlations_parser.add_argument(
+        "--probe-csv",
+        required=True,
+        help="quality_probe_processed.csv generado por Quality Engine",
+    )
+    correlations_parser.add_argument(
+        "--host-csv",
+        help="host_samples.csv; opcional, necesario para CPU ↔ RTT/loss",
+    )
+    correlations_parser.add_argument(
+        "--output",
+        "-o",
+        default="resultados_correlations",
+        help="Directorio de salida",
+    )
+    correlations_parser.add_argument(
+        "--bucket-seconds",
+        type=int,
+        default=5,
+        help="Tamaño del bucket para alinear series",
+    )
+    correlations_parser.add_argument(
+        "--min-pairs",
+        type=int,
+        default=12,
+        help="Pares válidos mínimos para interpretar una asociación",
+    )
+    correlations_parser.add_argument(
+        "--weak-abs-rho",
+        type=float,
+        default=0.30,
+        help="|rho| por debajo del cual la asociación se marca como débil",
+    )
 
     validate_parser = subparsers.add_parser("validar", help="Validar la estructura de un CSV")
     validate_parser.add_argument("csv", help="Ruta al archivo CSV")
@@ -306,6 +350,49 @@ def main(argv: list[str] | None = None) -> int:
                 print("ADVERTENCIA: interfaz y sondas no se solapan; no se generaron eventos conjuntos.")
             print("Causalidad: NO inferida por Event Engine")
             print(f"Eventos: {events_path.resolve()}")
+            return 0
+
+        if args.command == "analyze-correlations":
+            correlation_config = CorrelationConfig(
+                bucket_seconds=args.bucket_seconds,
+                min_pairs=args.min_pairs,
+                weak_abs_rho=args.weak_abs_rho,
+            )
+            correlation_result = analyze_correlations(
+                interface_processed_csv=args.interface_csv,
+                probe_processed_csv=args.probe_csv,
+                host_csv=args.host_csv,
+                config=correlation_config,
+            )
+            correlations_path = write_correlations(correlation_result, args.output)
+            metadata = correlation_result.metadata
+            print("Correlation Engine completado correctamente.")
+            print("Alcance: únicamente ventana observada")
+            print(f"Bucket temporal: {metadata['bucket_seconds']} s")
+            print(
+                "Solapamiento interfaz↔sondas: "
+                f"{metadata['network_overlap']['duration_seconds']:.3f} s"
+            )
+            if metadata["host_supplied"]:
+                print(
+                    "Solapamiento host↔sondas: "
+                    f"{metadata['host_probe_overlap']['duration_seconds']:.3f} s"
+                )
+            else:
+                print("Host: N/D (no se suministró host_samples.csv)")
+            print(f"Relaciones evaluadas: {len(correlation_result.correlations)}")
+            for row in correlation_result.correlations.to_dict(orient="records"):
+                rho = row["spearman_rho"]
+                rho_text = "N/D" if rho is None or rho != rho else f"{rho:+.3f}"
+                target = "" if row["target"] is None or row["target"] != row["target"] else f" [{row['target']}]"
+                print(
+                    f"  {row['x_metric']} ↔ {row['y_metric']}{target} | "
+                    f"n={row['pair_count']} | rho={rho_text} | "
+                    f"{row['strength']} | {row['evidence_status']}"
+                )
+            print("Causalidad: NO inferida por Correlation Engine")
+            print("p-value inferencial: NO calculado por autocorrelación temporal potencial")
+            print(f"Correlaciones: {correlations_path.resolve()}")
             return 0
 
         validation = load_and_validate_csv(args.csv, getattr(args, "mapping", None))
