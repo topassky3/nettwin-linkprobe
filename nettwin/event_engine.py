@@ -378,7 +378,7 @@ def _make_event(event_id: str, rows: pd.DataFrame, thresholds: EventThresholds) 
     rows = rows.sort_values("timestamp")
     start = rows["timestamp"].iloc[0]
     last_bucket = rows["timestamp"].iloc[-1]
-    end = last_bucket + pd.Timedelta(seconds=thresholds.bucket_seconds)
+    end = last_bucket + pd.to_timedelta(float(thresholds.bucket_seconds), unit="s")
     metrics_union: set[str] = set()
     evidence_buckets: list[dict[str, Any]] = []
 
