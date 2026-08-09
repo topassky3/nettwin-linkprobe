@@ -98,8 +98,10 @@ def _downgrade_mismatched_gateway(payload: dict[str, Any]) -> None:
 def _prepare_bom_compatible_config(config_path: str | Path) -> tuple[Path, Path | None]:
     """Normaliza temporalmente UTF-8 BOM sin cambiar el archivo del usuario.
 
-    Si la ruta no existe o no es JSON, no se intercepta: el motor conserva su
-    validación y sus mensajes de error habituales.
+    El temporal se crea en el directorio temporal del sistema. Para conservar la
+    semántica de Fase 11, `output.directory` se convierte a absoluto respecto del
+    archivo original antes de delegar en el engine. El SHA-256 final sigue siendo
+    el de los bytes originales suministrados por el administrador.
     """
     original = Path(config_path).resolve()
     if not original.exists() or not original.is_file() or original.suffix.lower() != ".json":
@@ -109,17 +111,29 @@ def _prepare_bom_compatible_config(config_path: str | Path) -> tuple[Path, Path 
     if not raw.startswith(b"\xef\xbb\xbf"):
         return original, None
 
-    text = raw.decode("utf-8-sig")
+    try:
+        payload = json.loads(raw.decode("utf-8-sig"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"JSON inválido en {original}: {exc}") from exc
+
+    if isinstance(payload, dict):
+        output = payload.get("output")
+        if isinstance(output, dict):
+            raw_directory = str(output.get("directory") or "").strip()
+            if raw_directory:
+                directory = Path(raw_directory)
+                if not directory.is_absolute():
+                    output["directory"] = str((original.parent / directory).resolve())
+
     handle = tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
         suffix=".json",
-        prefix=".nettwin_preflight_bom_",
-        dir=original.parent,
+        prefix="nettwin_preflight_bom_",
         delete=False,
     )
     try:
-        handle.write(text)
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
         temporary = Path(handle.name)
     finally:
         handle.close()
@@ -154,11 +168,19 @@ def run_preflight(*args: Any, redact_local_addresses: bool = False, **kwargs: An
     Ninguna de estas operaciones envía tráfico de red ni modifica configuración
     de red, rutas, firewall, interfaces o servicios.
     """
-    if not args:
+    if args:
+        config_argument = args[0]
+        trailing_args = args[1:]
+    elif "config_path" in kwargs:
+        config_argument = kwargs.pop("config_path")
+        trailing_args = ()
+    else:
         raise ValueError("Debe suministrar la ruta de configuración")
 
-    original_config, temporary_config = _prepare_bom_compatible_config(args[0])
-    call_args = (temporary_config or original_config, *args[1:])
+    original_config, temporary_config = _prepare_bom_compatible_config(
+        config_argument
+    )
+    call_args = (temporary_config or original_config, *trailing_args)
 
     try:
         try:
