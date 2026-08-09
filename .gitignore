@@ -1,0 +1,37 @@
+@"
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+*.crt
+
+# Real ISP data
+runs/
+data/raw/
+data/private/
+customer_data/
+hachenet_data/
+
+# Generated reports
+reports/private/
+*.log
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+"@ | Set-Content .gitignore
