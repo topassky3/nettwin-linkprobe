@@ -56,8 +56,23 @@ def _prepare_interface(df: pd.DataFrame, capacity_mbps: float | None) -> tuple[p
     ):
         work[column] = _numeric(work[column])
 
-    work["elapsed_seconds"] = work.groupby("interface")["timestamp"].diff().dt.total_seconds()
-    valid_elapsed = work["elapsed_seconds"] > 0
+    if "sample_status" in work:
+        work["sample_ok"] = work["sample_status"].astype(str).str.lower().eq("ok")
+    else:
+        work["sample_ok"] = True
+
+    # Los deltas del collector se calculan contra la última lectura válida de
+    # contadores. Por tanto, si existe una fila de error intermedia, el tiempo
+    # para calcular el rate debe abarcar también ese hueco y no solo el último
+    # intervalo nominal.
+    work["elapsed_seconds"] = np.nan
+    for _, group in work.groupby("interface", sort=False):
+        valid_index = group.index[group["sample_ok"]]
+        valid_timestamps = work.loc[valid_index, "timestamp"]
+        elapsed = valid_timestamps.diff().dt.total_seconds()
+        work.loc[valid_index, "elapsed_seconds"] = elapsed.to_numpy()
+
+    valid_elapsed = work["sample_ok"] & (work["elapsed_seconds"] > 0)
     work["rx_rate_mbps"] = np.where(
         valid_elapsed,
         work["rx_bytes_delta"] * 8.0 / work["elapsed_seconds"] / 1_000_000.0,
@@ -82,10 +97,7 @@ def _prepare_interface(df: pd.DataFrame, capacity_mbps: float | None) -> tuple[p
 
     rows: list[dict[str, Any]] = []
     for interface, group in work.groupby("interface", sort=True):
-        if "sample_status" in group:
-            status_ok = group["sample_status"].astype(str).str.lower().eq("ok")
-        else:
-            status_ok = pd.Series(True, index=group.index)
+        status_ok = group["sample_ok"]
         valid = group[status_ok]
         rows.append(
             {
@@ -189,7 +201,7 @@ def analyze_quality(
         "availability_definition": "porcentaje de ciclos con reachability=True durante la ventana observada por target",
         "loss_definition": "(paquetes_enviados - paquetes_recibidos) / paquetes_enviados * 100, agregado por target",
         "delay_variation_definition": "abs(RTT mediano actual - RTT mediano anterior) por target; no es jitter unidireccional",
-        "rate_definition": "bytes_delta * 8 / elapsed_seconds / 1e6",
+        "rate_definition": "bytes_delta * 8 / segundos transcurridos desde la última lectura válida de contadores / 1e6",
         "utilization_definition": "max(rx_rate_mbps, tx_rate_mbps) / capacity_mbps * 100; solo si capacity_mbps fue suministrada explícitamente",
         "limitations": [
             "La disponibilidad describe únicamente la ventana observada.",
