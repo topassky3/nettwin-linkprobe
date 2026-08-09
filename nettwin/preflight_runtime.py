@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
 import tempfile
 from typing import Any
 
-from nettwin.preflight_engine import PreflightResult
+from nettwin.preflight_engine import ExperimentConfig, PreflightResult
+from nettwin.preflight_engine import load_experiment_config as _engine_load_experiment_config
 from nettwin.preflight_engine import run_preflight as _engine_run_preflight
 
 
@@ -140,6 +142,31 @@ def _prepare_bom_compatible_config(config_path: str | Path) -> tuple[Path, Path 
     return original, temporary
 
 
+def load_experiment_config_compatible(config_path: str | Path) -> ExperimentConfig:
+    """Carga configuración externa aceptando UTF-8 con o sin BOM.
+
+    Cuando existe BOM, usa la misma normalización temporal de Preflight, conserva
+    el directorio de salida resuelto respecto del archivo original y restaura en
+    el objeto final la identidad y SHA-256 de los bytes originales.
+    """
+    original, temporary = _prepare_bom_compatible_config(config_path)
+    try:
+        config = _engine_load_experiment_config(temporary or original)
+        if temporary is None:
+            return config
+        return replace(
+            config,
+            config_path=original,
+            config_sha256=_sha256(original),
+        )
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def _restore_original_config_identity(
     payload: dict[str, Any], original: Path, temporary: Path | None
 ) -> None:
@@ -200,8 +227,6 @@ def run_preflight(*args: Any, redact_local_addresses: bool = False, **kwargs: An
         if redact_local_addresses:
             _redact_addresses(result.payload)
 
-        # El artefacto debe reflejar exactamente el payload final, incluida la
-        # decisión sobre pertenencia del gateway y cualquier redacción.
         _rewrite_artifact(result)
         return result
     finally:
