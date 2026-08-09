@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from nettwin.cli import build_parser
 from nettwin.interface_collector import InterfaceCollector, _counter_delta, collect_interface, list_interfaces
 
 
@@ -94,7 +95,6 @@ class InterfaceCollectorTests(unittest.TestCase):
             Counters(100, 200, 10, 20, 0, 0, 0, 0),
             Counters(110, 220, 11, 22, 0, 0, 0, 0),
             Counters(120, 240, 12, 24, 0, 0, 0, 0),
-            Counters(130, 260, 13, 26, 0, 0, 0, 0),
         ])
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "interface_samples.csv"
@@ -104,6 +104,20 @@ class InterfaceCollectorTests(unittest.TestCase):
         self.assertEqual(len(rows), 3)
         self.assertTrue(all(row["interface"] == "eth0" for row in rows))
 
+    def test_collection_continues_after_transient_failure(self):
+        provider = FakeProvider([
+            Counters(100, 200, 10, 20, 0, 0, 0, 0),
+            Counters(120, 240, 12, 24, 0, 0, 0, 0),
+        ], fail_on_call=2)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "interface_samples.csv"
+            collect_interface("eth0", path, interval_seconds=0.01, samples=3, provider=provider, sleep_fn=lambda _: None)
+            with path.open(encoding="utf-8") as handle:
+                rows = list(csv.DictReader(handle))
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[1]["sample_status"], "error")
+        self.assertEqual(rows[2]["sample_status"], "ok")
+
     def test_list_interfaces_exposes_state_speed_mtu_and_counter_presence(self):
         provider = FakeProvider([Counters(1, 2, 3, 4, 0, 0, 0, 0)])
         rows = list_interfaces(provider)
@@ -112,6 +126,15 @@ class InterfaceCollectorTests(unittest.TestCase):
         self.assertEqual(rows[0]["speed_mbps"], 1000)
         self.assertEqual(rows[0]["mtu"], 1500)
         self.assertTrue(rows[0]["has_counters"])
+
+    def test_cli_exposes_interface_commands(self):
+        parser = build_parser()
+        args = parser.parse_args(["collect-interface", "--interface", "eth0", "--samples", "3"])
+        self.assertEqual(args.command, "collect-interface")
+        self.assertEqual(args.interface, "eth0")
+        self.assertEqual(args.samples, 3)
+        interfaces_args = parser.parse_args(["interfaces"])
+        self.assertEqual(interfaces_args.command, "interfaces")
 
 
 if __name__ == "__main__":
