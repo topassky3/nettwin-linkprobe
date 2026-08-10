@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 import tempfile
 import unittest
 
 from nettwin import __version__
+from nettwin.integrity_engine import IntegrityConfig, finalize_integrity, verify_integrity
+from nettwin.orchestrator_engine import OrchestratorResult
 from nettwin.pilot_engine import (
     LOCAL_MODE,
     PILOT_SCHEMA_VERSION,
@@ -59,6 +60,49 @@ class PilotEngineTests(unittest.TestCase):
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return path
 
+    def _synthetic_orchestrator(self, config_path: str | Path, **_kwargs) -> OrchestratorResult:
+        """Fixture equivalente al contrato real de Fase 12.
+
+        El generador de Fase 13 crea un run analítico sellado, pero no incluye el
+        log operacional porque ese archivo pertenece al Orquestador. Para que la
+        prueba de Fase 15 simule realmente un OrchestratorResult válido, añadimos
+        logs/linkprobe.log y volvemos a sellar/verificar el run, igual que hace la
+        aceptación sintética ya validada en Fase 14.
+        """
+        root = Path(config_path).resolve().parent
+        run = generate_report_debug_run(root)
+        log_path = run / "logs" / "linkprobe.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("phase15 synthetic capture log\n", encoding="utf-8")
+
+        experiment = json.loads((run / "experiment_config.json").read_text(encoding="utf-8"))
+        finalize_integrity(
+            run,
+            config=IntegrityConfig(
+                run_id=str(experiment["run"]["run_id"]),
+                interface=str(experiment["interface"]["name"]),
+                targets=tuple(str(row["name"]) for row in experiment["targets"]),
+                requested_duration_seconds=float(experiment["run"]["duration_seconds"]),
+                config_path=run / "experiment_config.json",
+                sensor_version="0.3.0",
+                analyzer_version="0.3.0",
+            ),
+        )
+        verified = verify_integrity(run, strict_untracked=True)
+        self.assertTrue(verified.valid)
+
+        return OrchestratorResult(
+            run_dir=run,
+            status="completed",
+            stop_reason="duration_elapsed",
+            preflight_ready=True,
+            orchestration_path=run / "orchestration.json",
+            integrity_valid=True,
+            checksums_path=run / "checksums.sha256",
+            metadata_path=run / "run_metadata.json",
+            integrity_report_path=verified.report_path,
+        )
+
     def test_phase15_uses_v030_release_metadata(self):
         self.assertEqual(__version__, "0.3.0")
 
@@ -73,6 +117,8 @@ class PilotEngineTests(unittest.TestCase):
             result = validate_pilot_config(path)
             self.assertFalse(result.valid)
             self.assertEqual(result.mode, PRODUCTION_MODE)
+            joined = "\n".join(result.errors)
+            self.assertIn("REEMPLAZAR_IP_AUTORIZADA", joined)
 
     def test_local_acceptance_config_is_loopback_only_and_valid(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -175,16 +221,7 @@ class PilotEngineTests(unittest.TestCase):
                 root / "pilot_local.json", local_acceptance=True, interface_name="eth0"
             )
 
-            def synthetic_orchestrator(*args, **kwargs):
-                generate_report_debug_run(root)
-                return SimpleNamespace(
-                    preflight_ready=True,
-                    integrity_valid=True,
-                    status="completed",
-                    stop_reason="duration_elapsed",
-                )
-
-            result = run_pilot(config_path, orchestrator_fn=synthetic_orchestrator)
+            result = run_pilot(config_path, orchestrator_fn=self._synthetic_orchestrator)
             self.assertEqual(result.status, "PASS", result.message)
             summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
             self.assertEqual(summary["stages"]["preflight_capture"], "PASS")
@@ -200,15 +237,6 @@ class PilotEngineTests(unittest.TestCase):
                 root / "pilot_local.json", local_acceptance=True, interface_name="eth0"
             )
 
-            def synthetic_orchestrator(*args, **kwargs):
-                generate_report_debug_run(root)
-                return SimpleNamespace(
-                    preflight_ready=True,
-                    integrity_valid=True,
-                    status="completed",
-                    stop_reason="duration_elapsed",
-                )
-
             def tampering_report(*args, **kwargs):
                 result = generate_report(*args, **kwargs)
                 with (root / "run" / "interface_samples.csv").open("a", encoding="utf-8") as handle:
@@ -217,7 +245,7 @@ class PilotEngineTests(unittest.TestCase):
 
             result = run_pilot(
                 config_path,
-                orchestrator_fn=synthetic_orchestrator,
+                orchestrator_fn=self._synthetic_orchestrator,
                 report_fn=tampering_report,
             )
             self.assertEqual(result.status, "FAIL")
