@@ -215,6 +215,16 @@ def _headline_metrics(
     return metrics
 
 
+def _duration_text(seconds: float | None) -> str:
+    if seconds is None:
+        return "la ventana observada"
+    if seconds >= 3600:
+        return f"una ventana observada de {seconds / 3600:.2f} horas"
+    if seconds >= 60:
+        return f"una ventana observada de {seconds / 60:.2f} minutos"
+    return f"una ventana observada de {seconds:.1f} segundos"
+
+
 def _executive_summary(
     *,
     company: str,
@@ -292,9 +302,10 @@ def _limitations(
     events_metadata: dict[str, Any] | None,
     correlations_metadata: dict[str, Any] | None,
     evidence_metadata: dict[str, Any] | None,
+    observed_duration_seconds: float | None,
 ) -> list[str]:
     items = [
-        "Una ventana de cuatro horas caracteriza únicamente el periodo observado y no representa necesariamente el comportamiento semanal o mensual del enlace.",
+        f"{_duration_text(observed_duration_seconds).capitalize()} caracteriza únicamente el periodo observado y no representa necesariamente el comportamiento semanal o mensual del enlace.",
         "La disponibilidad reportada es disponibilidad observada durante la captura; no es un SLA ni disponibilidad histórica.",
         "Correlación y coincidencia temporal no demuestran causalidad.",
         "La causa física exacta de un evento no se afirma cuando la evidencia disponible no la identifica.",
@@ -366,12 +377,12 @@ def _chart_data(
     drops_frame["drops_delta_total"] = drops_frame["rx_drops_delta"] + drops_frame["tx_drops_delta"]
     cpu = [{"label": "CPU", "points": points(host, "cpu_percent")}]
     charts = {
-        "utilization": svg_chart("Utilización", utilization, global_start=start, global_end=end, unit="%"),
-        "rtt": svg_chart("RTT por target", rtt, global_start=start, global_end=end, unit=" ms"),
-        "delay": svg_chart("Variación temporal de retardo", delay, global_start=start, global_end=end, unit=" ms"),
-        "loss": svg_chart("Pérdida por target", loss, global_start=start, global_end=end, unit="%"),
-        "drops": svg_chart("Drops por intervalo", [{"label": "drops", "points": points(drops_frame, "drops_delta_total")}], global_start=start, global_end=end),
-        "cpu": svg_chart("CPU del host", cpu, global_start=start, global_end=end, unit="%"),
+        "utilization": svg_chart("Utilización", utilization, global_start=start, global_end=end, unit="%", y_min=0.0),
+        "rtt": svg_chart("RTT por target", rtt, global_start=start, global_end=end, unit=" ms", y_min=0.0),
+        "delay": svg_chart("Variación temporal de retardo", delay, global_start=start, global_end=end, unit=" ms", y_min=0.0),
+        "loss": svg_chart("Pérdida por target", loss, global_start=start, global_end=end, unit="%", y_min=0.0),
+        "drops": svg_chart("Drops por intervalo", [{"label": "drops", "points": points(drops_frame, "drops_delta_total")}], global_start=start, global_end=end, y_min=0.0),
+        "cpu": svg_chart("CPU del host", cpu, global_start=start, global_end=end, unit="%", y_min=0.0),
     }
     return charts, start, end
 
@@ -550,6 +561,7 @@ def generate_report(
             event_result.metadata if event_result is not None else None,
             correlation_result.metadata if correlation_result is not None else None,
             evidence_result.metadata if evidence_result is not None else None,
+            observed_duration,
         ),
         "recommendations_note": recommendations_note,
         "commercial_next_step": commercial,
