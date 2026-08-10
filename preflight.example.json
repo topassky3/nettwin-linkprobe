@@ -1,0 +1,41 @@
+{
+  "run": {
+    "run_id": "HACHENET-YYYYMMDD-LINK01-001",
+    "duration_seconds": 14400
+  },
+  "interface": {
+    "name": "eth0",
+    "interval_seconds": 5,
+    "capacity_mbps": null
+  },
+  "host": {
+    "interval_seconds": 5
+  },
+  "probes": {
+    "interval_seconds": 5,
+    "timeout_ms": 1000,
+    "payload_bytes": 32,
+    "count_per_target": 1
+  },
+  "targets": [
+    {
+      "name": "gateway",
+      "address": "192.0.2.1",
+      "role": "internal_authorized"
+    },
+    {
+      "name": "controlled_external",
+      "address": "198.51.100.1",
+      "role": "controlled_external"
+    },
+    {
+      "name": "external_reference",
+      "address": "203.0.113.1",
+      "role": "public_reference"
+    }
+  ],
+  "output": {
+    "directory": "./runs/HACHENET-YYYYMMDD-LINK01-001",
+    "minimum_free_disk_mb": 50
+  }
+}
