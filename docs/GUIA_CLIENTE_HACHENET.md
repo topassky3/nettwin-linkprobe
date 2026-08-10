@@ -1,205 +1,337 @@
 # Guía del cliente — Piloto HacheNet de NetTwin LinkProbe v0.3
 
-Esta guía está pensada para el administrador que ejecutará el piloto. El objetivo es medir un enlace autorizado durante 4 horas, generar evidencia reproducible y devolver el paquete de resultados para análisis/revisión.
+Esta guía está pensada para el técnico o administrador que ejecutará el piloto real.
 
-## 1. Lo que necesitamos antes de ejecutar
+## Regla principal
 
-HacheNet debe definir explícitamente:
+El operador **no tiene que abrir, leer ni analizar manualmente los CSV**.
 
-1. **Interfaz del servidor que corresponde al enlace a observar**.
-2. **Uno a tres targets autorizados** para las sondas ICMP.
-3. **Rol técnico de cada target**, por ejemplo referencia interna, referencia controlada o referencia externa.
-4. **Responsable que aprueba esos targets**.
-5. **Referencia de autorización**: ticket, correo, reunión, cambio aprobado u otra referencia interna verificable.
-6. **Capacidad real del enlace**, únicamente si se conoce. Si no se conoce, se deja `null`; NetTwin no sustituye ese dato con la velocidad de la NIC.
+Su trabajo es:
 
-No se requiere entregar credenciales, tráfico de clientes ni contenido de comunicaciones.
+```text
+preparar configuración autorizada
+-> validar
+-> ejecutar pilot-run
+-> dejar correr 4 horas
+-> revisar PASS
+-> abrir report/report.html
+-> entregar la carpeta completa
+```
 
-## 2. Preparar el software
+NetTwin realiza automáticamente después de la captura:
 
-En el servidor autorizado:
+```text
+sellado SHA-256
+-> verificación de integridad
+-> Quality Gate
+-> Event Engine
+-> Correlation Engine
+-> Evidence Engine
+-> Event Fingerprints
+-> Link Health Audit
+-> segunda verificación de integridad
+```
 
-```bash
+---
+
+# 1. Datos que HacheNet debe definir antes de ejecutar
+
+Se requieren datos reales y autorizados:
+
+1. interfaz del servidor correspondiente al enlace a observar;
+2. entre 1 y 3 targets autorizados para ICMP;
+3. rol técnico de cada target;
+4. responsable que aprobó los targets;
+5. referencia verificable de autorización;
+6. capacidad real del enlace únicamente si se conoce.
+
+Si la capacidad no se conoce, se deja `null`. NetTwin no utiliza la velocidad de la NIC como sustituto.
+
+No se requieren credenciales ni contenido de comunicaciones de clientes.
+
+---
+
+# 2. Instalar NetTwin
+
+En PowerShell:
+
+```powershell
 git clone https://github.com/topassky3/nettwin-linkprobe.git
 cd nettwin-linkprobe
 python -m pip install -r requirements.txt
 python nettwin.py --version
 ```
 
-Debe mostrar versión `0.3.0`.
-
-## 3. Crear la plantilla
-
-```bash
-python nettwin.py pilot-config --output hachenet_pilot.json
-```
-
-La plantilla nace bloqueada deliberadamente. No ejecutar todavía `pilot-run`.
-
-## 4. Completar `hachenet_pilot.json`
-
-Reemplazar únicamente con información real y aprobada:
-
-```json
-{
-  "run": {
-    "run_id": "HACHENET-AAAAMMDD-LINK01-001",
-    "duration_seconds": 14400
-  },
-  "interface": {
-    "name": "INTERFAZ_REAL",
-    "interval_seconds": 5,
-    "capacity_mbps": null
-  },
-  "probes": {
-    "interval_seconds": 5,
-    "timeout_ms": 1000,
-    "payload_bytes": 32,
-    "count_per_target": 1
-  },
-  "targets": [
-    {
-      "name": "NOMBRE_TARGET",
-      "address": "IP_AUTORIZADA",
-      "role": "ROL_TECNICO",
-      "authorized": true
-    }
-  ],
-  "pilot": {
-    "authorization": {
-      "confirmed": true,
-      "reference": "REFERENCIA_REAL",
-      "approved_by": "RESPONSABLE_REAL"
-    }
-  }
-}
-```
-
-No cambiar `duration_seconds`: el piloto productivo de Fase 15 debe durar `14400` segundos = 4 horas.
-
-## 5. Validar SIN ejecutar probes
-
-Antes del piloto:
-
-```bash
-python nettwin.py pilot-validate --config hachenet_pilot.json
-```
-
-Este comando es de preparación. No ejecuta sondas activas y no modifica configuración de red.
-
-El administrador debe revisar:
+Esperado:
 
 ```text
+NetTwin ISP 0.3.0
+```
+
+---
+
+# 3. Definir los datos reales del piloto
+
+El técnico cambia únicamente estos valores:
+
+```powershell
+$RUN_ID       = "HACHENET-20260810-LINK01-001"
+$INTERFACE    = "REEMPLAZAR_POR_INTERFAZ_REAL"
+$TARGET_NAME  = "REEMPLAZAR_POR_NOMBRE_TARGET"
+$TARGET_IP    = "REEMPLAZAR_POR_IP_AUTORIZADA"
+$TARGET_ROLE  = "REEMPLAZAR_POR_ROL_TECNICO"
+$APPROVED_BY  = "REEMPLAZAR_POR_RESPONSABLE"
+$AUTH_REF     = "REEMPLAZAR_POR_REFERENCIA_AUTORIZACION"
+
+# Ejemplo si la capacidad real es conocida: 300
+# Si no se conoce:
+$CAPACITY_MBPS = $null
+
+$PILOT_DIR    = "pilotos\$RUN_ID"
+$PILOT_CONFIG = "$PILOT_DIR\hachenet_pilot.json"
+```
+
+Para listar interfaces visibles:
+
+```powershell
+python nettwin.py interfaces
+```
+
+---
+
+# 4. Crear configuración
+
+```powershell
+New-Item -ItemType Directory -Path $PILOT_DIR -Force | Out-Null
+
+python nettwin.py pilot-config `
+  --output $PILOT_CONFIG `
+  --interface $INTERFACE `
+  --run-id $RUN_ID
+```
+
+La plantilla inicialmente mostrará:
+
+```text
+Estado: PLANTILLA NO EJECUTABLE
+```
+
+Eso es esperado porque todavía falta completar target y autorización.
+
+---
+
+# 5. Completar la configuración por comando
+
+```powershell
+$c = Get-Content $PILOT_CONFIG -Encoding UTF8 | ConvertFrom-Json
+
+$c.run.run_id = $RUN_ID
+$c.run.duration_seconds = 14400
+
+$c.interface.name = $INTERFACE
+$c.interface.capacity_mbps = $CAPACITY_MBPS
+
+$c.targets[0].name = $TARGET_NAME
+$c.targets[0].address = $TARGET_IP
+$c.targets[0].role = $TARGET_ROLE
+$c.targets[0].authorized = $true
+
+$c.pilot.authorization.confirmed = $true
+$c.pilot.authorization.reference = $AUTH_REF
+$c.pilot.authorization.approved_by = $APPROVED_BY
+
+$c | ConvertTo-Json -Depth 20 | Set-Content $PILOT_CONFIG -Encoding UTF8
+```
+
+No es necesario editar el JSON manualmente.
+
+---
+
+# 6. Validar antes de ejecutar
+
+```powershell
+python nettwin.py pilot-validate `
+  --config $PILOT_CONFIG
+
+$LASTEXITCODE
+```
+
+Debe aparecer:
+
+```text
+Modo: hachenet_pilot
 Estado: PASS
-Duración: 4 h
-Número de targets: 1–3
-Carga ICMP estimada
-Filas esperadas
-Warnings
 ```
 
-Si aparece `FAIL`, **no ejecutar el piloto**. Corregir la configuración y volver a validar.
-
-## 6. Condiciones de seguridad
-
-NetTwin bloquea o evita por diseño:
-
-- targets no marcados como autorizados;
-- loopback en modo productivo;
-- multicast y link-local;
-- redes reservadas para documentación;
-- más de 3 targets;
-- payload ICMP > 128 bytes;
-- más de 3 echoes por target/ciclo;
-- intervalo de probes < 2 segundos;
-- duración productiva distinta de 4 horas.
-
-NetTwin no:
-
-- captura payload de usuarios;
-- inspecciona conversaciones o navegación;
-- escanea rangos de red;
-- descubre hosts automáticamente;
-- cambia firewall;
-- cambia routing;
-- cambia configuración de interfaces;
-- ejecuta pruebas agresivas de throughput.
-
-## 7. Ejecutar las 4 horas
-
-Solo después de que `pilot-validate` indique `PASS` y el administrador confirme que la configuración corresponde al enlace/targets autorizados:
-
-```bash
-python nettwin.py pilot-run --config hachenet_pilot.json --authorized
-```
-
-Después de iniciar, el proceso es automático:
+Y el código de salida debe ser:
 
 ```text
-validación
--> preflight
--> captura coordinada
--> sellado SHA-256
--> verificación estricta
--> análisis
--> informe
--> segunda verificación estricta
+0
 ```
 
-No es necesario ejecutar comandos analíticos adicionales durante la ventana.
+El validador muestra además la duración, targets, cantidad estimada de sondas, carga ICMP y filas esperadas.
 
-## 8. Qué debe verse al terminar
+`pilot-validate` no ejecuta probes ni modifica la red.
 
-Resultado esperado:
+Si devuelve `FAIL`, no ejecutar `pilot-run`.
+
+---
+
+# 7. Ejecutar el piloto de 4 horas
+
+Solo después de `PASS` y de confirmar que la configuración corresponde a los datos autorizados:
+
+```powershell
+python nettwin.py pilot-run `
+  --config $PILOT_CONFIG `
+  --authorized
+```
+
+El proceso dura aproximadamente 4 horas de captura y después continúa automáticamente con análisis e informe.
+
+Durante la ejecución:
+
+- mantener abierta la terminal;
+- no apagar ni reiniciar el servidor;
+- no suspender el equipo;
+- no modificar los archivos del piloto;
+- no lanzar un segundo `pilot-run` sobre el mismo directorio.
+
+El operador no debe ejecutar comandos analíticos durante la ventana.
+
+---
+
+# 8. Qué ocurre automáticamente al terminar las 4 horas
+
+El mismo `pilot-run` continúa con:
 
 ```text
+sellado SHA-256
+-> verify-integrity estricto
+-> Quality Gate
+-> Events
+-> Correlations
+-> Evidence
+-> Fingerprints
+-> report.json
+-> report.html
+-> verify-integrity posterior
+-> pilot_summary.json
+```
+
+**No hay que entrar a `interface_samples.csv`, `host_samples.csv` ni `probe_samples.csv` para obtener el resultado.**
+
+---
+
+# 9. Resultado esperado
+
+Al final debe aparecer algo equivalente a:
+
+```text
+Fase 15 finalizada.
 Estado: PASS
 Quality Gate: PASS
 Análisis ejecutado: SÍ
 ```
 
-El archivo `pilot_summary.json` debe mostrar las etapas:
+Y:
 
-```text
-validation              PASS
-preflight_capture       PASS
-integrity_before_report PASS
-analysis_report         PASS
-integrity_after_report  PASS
+```powershell
+$LASTEXITCODE
 ```
 
-## 9. Qué archivos conservar
-
-No modificar manualmente los archivos dentro de `run/`.
-
-Conservar completos:
+Debe devolver:
 
 ```text
-hachenet_pilot.json
+0
+```
+
+---
+
+# 10. Dónde quedan los datos
+
+Todo queda dentro de la carpeta del `RUN_ID`:
+
+```text
+pilotos/
+└── HACHENET-20260810-LINK01-001/
+    ├── hachenet_pilot.json
+    ├── pilot_summary.json
+    ├── run/
+    │   ├── interface_samples.csv
+    │   ├── host_samples.csv
+    │   ├── probe_samples.csv
+    │   ├── experiment_config.json
+    │   ├── preflight.json
+    │   ├── orchestration.json
+    │   ├── run_metadata.json
+    │   ├── checksums.sha256
+    │   └── logs/linkprobe.log
+    └── report/
+        ├── dataset_quality.json
+        ├── analysis.json
+        ├── report.json
+        ├── report.html
+        └── analysis/
+            ├── quality_summary.json
+            ├── events.json
+            ├── correlations.json
+            ├── evidence_records.json
+            └── event_fingerprints.json
+```
+
+Los CSV de `run/` son evidencia original y deben conservarse sin modificar.
+
+---
+
+# 11. Qué mira el técnico
+
+Solo necesita revisar:
+
+## Estado general
+
+```text
 pilot_summary.json
-run/
-report/
 ```
 
-Especialmente:
+Debe indicar `status = PASS` y todas las etapas `PASS`.
+
+## Informe técnico
 
 ```text
-run/checksums.sha256
-run/run_metadata.json
-run/interface_samples.csv
-run/host_samples.csv
-run/probe_samples.csv
 report/report.html
-report/report.json
-report/analysis.json
 ```
 
-## 10. Verificación final opcional
+Abrir con:
 
-Antes de entregar el paquete:
+```powershell
+Start-Process (
+  Resolve-Path "$PILOT_DIR\report\report.html"
+)
+```
 
-```bash
-python nettwin.py verify-integrity --run-dir run --strict-untracked
+---
+
+# 12. Qué entrega HacheNet
+
+Entregar la carpeta completa:
+
+```text
+pilotos\HACHENET-...\
+```
+
+No editar archivos de `run/` ni `checksums.sha256`.
+
+La carpeta contiene configuración, evidencia, integridad, análisis e informe final.
+
+---
+
+# 13. Verificación opcional antes de entregar
+
+```powershell
+python nettwin.py verify-integrity `
+  --run-dir "$PILOT_DIR\run" `
+  --strict-untracked
 ```
 
 Esperado:
@@ -212,55 +344,40 @@ Rutas inseguras: 0
 No rastreados: 0
 ```
 
-## 11. Qué debe devolver HacheNet
+---
 
-Entregar el directorio del piloto completo, sin editar los CSV ni el manifiesto SHA-256:
+# 14. Seguridad
 
-```text
-hachenet_pilot.json
-pilot_summary.json
-run/
-report/
-```
+NetTwin no:
 
-El `report.html` ya contiene el Link Health Audit generado automáticamente. El análisis posterior puede revisar eventos, correlaciones, Evidence Records y fingerprints conservando la evidencia original intacta.
+- captura payload de clientes;
+- inspecciona conversaciones o navegación;
+- escanea rangos;
+- descubre hosts automáticamente;
+- modifica firewall;
+- modifica routing;
+- modifica interfaces;
+- modifica servicios;
+- ejecuta throughput agresivo.
 
-## 12. Cómo interpretar el resultado
+Los probes productivos solo pueden utilizar targets explícitamente configurados y autorizados.
 
-El piloto caracteriza **solo esas 4 horas observadas**.
+---
 
-No debe interpretarse automáticamente como:
-
-- SLA histórico;
-- disponibilidad mensual;
-- comportamiento semanal;
-- crecimiento futuro;
-- capacidad máxima física;
-- causa definitiva de una degradación.
-
-Cuando NetTwin detecta algo, mantiene esta separación:
+# Resumen para el operador
 
 ```text
-HECHO
--> INTERPRETACIÓN
--> HIPÓTESIS
--> CONFIANZA
--> RECOMENDACIÓN
+1. Instalar.
+2. Definir datos autorizados.
+3. Crear configuración.
+4. Completarla por PowerShell.
+5. Ejecutar pilot-validate.
+6. Solo si PASS: pilot-run --authorized.
+7. Dejar correr 4 horas sin intervenir.
+8. Esperar el análisis automático.
+9. Confirmar PASS.
+10. Abrir report/report.html.
+11. Entregar la carpeta completa.
 ```
 
-Una correlación temporal no se presenta como prueba de causalidad.
-
-## Resumen para el administrador
-
-```text
-1. Instalar dependencias.
-2. Crear hachenet_pilot.json.
-3. Completar interfaz + targets + autorización reales.
-4. Ejecutar pilot-validate.
-5. Si PASS, revisar estimación de carga.
-6. Ejecutar pilot-run --authorized.
-7. Dejar terminar las 4 horas.
-8. Confirmar PASS e integridad válida.
-9. No modificar run/.
-10. Entregar hachenet_pilot.json + pilot_summary.json + run/ + report/.
-```
+**El técnico no analiza CSVs manualmente. NetTwin genera el resultado automáticamente.**
