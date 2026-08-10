@@ -65,6 +65,7 @@ def svg_chart(
     global_end: datetime | None,
     unit: str = "",
     height: int = 190,
+    y_min: float | None = None,
 ) -> str:
     width = 920
     left, right, top, bottom = 58, 18, 28, 34
@@ -108,6 +109,11 @@ def svg_chart(
         pad = (y1 - y0) * 0.08
         y0 -= pad
         y1 += pad
+    if y_min is not None:
+        floor = float(y_min)
+        y0 = max(y0, floor)
+        if y1 <= y0:
+            y1 = y0 + max(1.0, abs(y0) * 0.1)
 
     def sx(x: float) -> float:
         return left + (x - x0) / (x1 - x0) * plot_w
@@ -168,6 +174,7 @@ def event_svg(event: dict[str, Any]) -> str:
         global_end=end,
         unit="",
         height=150,
+        y_min=0.0,
     )
 
 
