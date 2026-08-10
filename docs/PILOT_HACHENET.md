@@ -30,6 +30,15 @@ verify-integrity --strict nuevamente
 pilot_summary.json
 ```
 
+## Dos modos separados
+
+Fase 15 tiene dos modos que nunca deben confundirse:
+
+- `local_acceptance`: valida software/readiness usando exclusivamente `127.0.0.1`.
+- `hachenet_pilot`: corresponde a la ventana productiva real de 4 h sobre targets explícitos y autorizados por HacheNet.
+
+Una aceptación local exitosa no equivale a haber ejecutado el piloto productivo.
+
 ## Principio de seguridad
 
 Fase 15 no inventa targets ni descubre la red.
@@ -122,7 +131,7 @@ Para validar el código antes de HacheNet existe un modo separado:
 
 ```powershell
 python nettwin.py pilot-config `
-  --output debug_fase15_local/pilot_local.json `
+  --output debug_fase15_local\pilot_local.json `
   --local-acceptance
 ```
 
@@ -181,3 +190,40 @@ RECOMENDACIÓN
 ```
 
 Correlación no implica causalidad.
+
+## Cierre
+
+### Software/readiness
+
+Antes de preparar la ventana real deben cumplirse:
+
+```text
+11/11 Pilot Engine                 ✅
+2/2 CLI                            ✅
+201/201 suite                      ✅
+NetTwin 0.3.0                      ✅
+local_acceptance PASS              ✅
+run íntegro                        ✅
+reporte generado                   ✅
+plantilla productiva bloqueada     ✅
+doble authorization gate          ✅
+```
+
+### Piloto productivo
+
+Fase 15 productiva solo queda cerrada cuando también existen:
+
+```text
+interfaz HacheNet confirmada        ✅
+1–3 targets explícitos autorizados  ✅
+roles documentados                  ✅
+referencia de aprobación            ✅
+approved_by                         ✅
+pilot-validate PASS                 ✅
+ventana real 14400 s                ✅
+pilot-run --authorized exit 0       ✅
+Quality Gate apto                   ✅
+run real sellado                    ✅
+report real generado                ✅
+integridad posterior válida         ✅
+```
