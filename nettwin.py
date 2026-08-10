@@ -9,6 +9,8 @@ from nettwin.fingerprint_cli import main as fingerprint_main
 from nettwin.integrity_cli import COMMANDS as INTEGRITY_COMMANDS
 from nettwin.integrity_cli import main as integrity_main
 from nettwin.orchestrator_cli import main as orchestrator_main
+from nettwin.pilot_cli import COMMANDS as PILOT_COMMANDS
+from nettwin.pilot_cli import main as pilot_main
 from nettwin.preflight_cli import main as preflight_main
 from nettwin.report_cli import main as report_main
 
@@ -23,6 +25,8 @@ def main(argv: list[str] | None = None) -> int:
         return report_main(args[1:])
     if args and args[0] == "dry-run":
         return dry_run_main(args[1:])
+    if args and args[0] in PILOT_COMMANDS:
+        return pilot_main(args)
     if args and args[0] == "analyze-evidence":
         return evidence_main(args[1:])
     if args and args[0] == "analyze-fingerprints":
@@ -36,6 +40,9 @@ def main(argv: list[str] | None = None) -> int:
         print("  run-linkprobe          Ejecutar collectors coordinados, cerrar y sellar el run")
         print("  report                 Verificar, analizar y generar Link Health Audit HTML/PDF opcional")
         print("  dry-run                Ejecutar pipeline local completo antes de HacheNet")
+        print("  pilot-config           Generar plantilla segura de Fase 15 o configuración local de aceptación")
+        print("  pilot-validate         Validar autorización, carga, targets y ventana sin ejecutar probes")
+        print("  pilot-run              Ejecutar el piloto validado; HacheNet real requiere --authorized")
         print("  analyze-evidence       Generar hallazgos HECHO→INTERPRETACIÓN→HIPÓTESIS→CONFIANZA→RECOMENDACIÓN")
         print("  analyze-fingerprints   Generar vectores compactos reproducibles por evento")
         print("  finalize-integrity     Generar run_metadata.json y checksums.sha256")
