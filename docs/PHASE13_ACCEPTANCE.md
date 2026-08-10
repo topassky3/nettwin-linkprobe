@@ -4,7 +4,7 @@ La fase no se considera cerrada hasta validar localmente todos los puntos.
 
 ## Suite
 
-Fase 12 terminó con 156 pruebas. Fase 13 añade 21 pruebas.
+Fase 12 terminó con 156 pruebas. Fase 13 añade 23 pruebas.
 
 Esperado:
 
@@ -13,7 +13,8 @@ Esperado:
 9/9   Report Engine
 1/1   Report CLI / analysis.json
 2/2   Acceptance CLI de caja negra
-177/177 suite completa
+2/2   Finalización visual/metodológica
+179/179 suite completa
 ```
 
 ## Acceptance CLI real
@@ -36,6 +37,20 @@ Estos tests validan:
 - `causal_inference_performed=false`.
 
 Las pruebas no dependen de la codificación exacta con la que Windows renderice caracteres acentuados en stdout. Los estados canónicos se validan mediante exit code y artefactos JSON.
+
+## Cierre visual y metodológico
+
+Deben pasar también:
+
+```powershell
+python -m unittest tests.test_phase13_finalization -v
+```
+
+Estas regresiones garantizan que:
+
+- las limitaciones describen la duración observada real y no contienen una ventana de cuatro horas hardcodeada;
+- un run sintético de 120 s reporta `2.00 minutos` en sus limitaciones;
+- utilización, RTT, variación de retardo, pérdida, drops, CPU y conteos de señales no renderizan ticks negativos producidos únicamente por padding gráfico.
 
 ## Run sintético rico
 
@@ -67,7 +82,8 @@ Debe producir:
 - seis gráficos de línea temporal;
 - gráfico por evento;
 - metodología;
-- limitaciones;
+- limitaciones coherentes con la duración observada;
+- ejes no negativos para métricas físicamente no negativas;
 - hashes SHA-256 de fuentes.
 
 ## Run real de Fase 12
@@ -132,7 +148,8 @@ byte a byte.
 - hipótesis ✅
 - confianza ✅
 - recomendaciones ligadas a evidencia ✅
-- limitaciones ✅
+- limitaciones dependientes de la ventana real ✅
+- ejes visuales coherentes con métricas no negativas ✅
 - anexos técnicos ✅
 - `analysis.json` ✅
 - HTML ✅
