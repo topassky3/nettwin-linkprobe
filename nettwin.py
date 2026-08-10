@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 
 from nettwin.cli import build_parser, main as legacy_main
+from nettwin.dry_run_cli import main as dry_run_main
 from nettwin.evidence_cli import main as evidence_main
 from nettwin.fingerprint_cli import main as fingerprint_main
 from nettwin.integrity_cli import COMMANDS as INTEGRITY_COMMANDS
@@ -20,6 +21,8 @@ def main(argv: list[str] | None = None) -> int:
         return orchestrator_main(args[1:])
     if args and args[0] == "report":
         return report_main(args[1:])
+    if args and args[0] == "dry-run":
+        return dry_run_main(args[1:])
     if args and args[0] == "analyze-evidence":
         return evidence_main(args[1:])
     if args and args[0] == "analyze-fingerprints":
@@ -32,6 +35,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  preflight              Validar entorno de forma observacional antes del piloto")
         print("  run-linkprobe          Ejecutar collectors coordinados, cerrar y sellar el run")
         print("  report                 Verificar, analizar y generar Link Health Audit HTML/PDF opcional")
+        print("  dry-run                Ejecutar pipeline local completo antes de HacheNet")
         print("  analyze-evidence       Generar hallazgos HECHO→INTERPRETACIÓN→HIPÓTESIS→CONFIANZA→RECOMENDACIÓN")
         print("  analyze-fingerprints   Generar vectores compactos reproducibles por evento")
         print("  finalize-integrity     Generar run_metadata.json y checksums.sha256")
