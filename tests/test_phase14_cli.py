@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -12,12 +13,17 @@ NETTWIN = REPO_ROOT / "nettwin.py"
 
 class Phase14CliTests(unittest.TestCase):
     def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
         return subprocess.run(
             [sys.executable, str(NETTWIN), *args],
             cwd=REPO_ROOT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             check=False,
+            env=env,
         )
 
     def test_public_help_exposes_dry_run_command(self):
